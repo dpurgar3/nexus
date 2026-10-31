@@ -452,12 +452,17 @@ async function geminiCandidates(){
   const flash = names.filter(n => /^gemini-[\d.]+-flash$/.test(n)).sort((a, b) => ver(b) - ver(a));
   const extra = ['gemini-flash-latest'].filter(n => names.includes(n));
   const lite = names.filter(n => /^gemini-[\d.]+-flash-lite$/.test(n)).sort((a, b) => ver(b) - ver(a));
-  return [...flash, ...extra, ...lite];
+  const extraLite = ['gemini-flash-lite-latest'].filter(n => names.includes(n));
+  // naizmjence flash i lite: kad flash potroši besplatni limit, lite (veći limit) odmah preuzima
+  const out = [], A = [...flash.slice(0, 2), ...extra], B = [...lite.slice(0, 2), ...extraLite];
+  for (let i = 0; i < Math.max(A.length, B.length); i++){ if (A[i]) out.push(A[i]); if (B[i]) out.push(B[i]); }
+  [...flash, ...lite].forEach(n => { if (!out.includes(n)) out.push(n); });
+  return out;
 }
 async function runGemini(sys, hist, signal, onText, onSources, useWeb){
   if (!settings.gkey) throw new Error('nema Gemini ključa');
-  let list = LS.get('gmodels', null);
-  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6)){ list = await geminiCandidates(); LS.set('gmodels', list); LS.set('gkeytail', settings.gkey.slice(-6)); }
+  let list = LS.get('gmodels2', null);
+  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6)){ list = await geminiCandidates(); LS.set('gmodels2', list); LS.set('gkeytail', settings.gkey.slice(-6)); }
   if (!list.length) throw new Error('nema dostupnog Gemini modela');
   const contents = [];
   hist.forEach(m => {
@@ -469,7 +474,8 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb){
   });
   const mkBody = (gm, fast) => { const gc = {temperature: Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? {thinkingBudget: 0} : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
   let lastErr;
-  for (let i = 0; i < Math.min(list.length, 6); i++){
+  let n429 = 0;
+  for (let i = 0; i < Math.min(list.length, 10); i++){
     const gm = list[i];
     // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
     const ac = new AbortController(); let slow = false, got = false;
@@ -479,10 +485,13 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb){
     try{
       let r = await call(mkBody(gm, LS.get('gfast', true)));
       if (!r.ok && useWeb && r.status === 400){ const tw = await r.clone().text(); if (/tool|search|ground/i.test(tw)){ useWeb = false; r = await call(mkBody(gm, LS.get('gfast', true))); } }
+      // 429 s uključenim webom: pokušaj isti model bez Google pretrage (pretraga ima zaseban, manji besplatni limit)
+      if (!r.ok && r.status === 429 && useWeb){ const rw = await call((() => { const b = JSON.parse(mkBody(gm, LS.get('gfast', true))); delete b.tools; return JSON.stringify(b); })()); if (rw.ok){ r = rw; useWeb = false; } }
       if (!r.ok && r.status !== 429 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
       if (!r.ok){
         const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
         lastErr = new Error('Gemini ' + r.status + ' (' + gm + '): ' + msg.slice(0, 120));
+        if (r.status === 429) n429++;
         if (r.status === 429 || r.status === 404 || r.status === 403 || r.status >= 500 || /quota|not found|free|overloaded/i.test(msg)) continue;
         throw lastErr;
       }
@@ -501,14 +510,15 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb){
           if (gmeta && gmeta.groundingChunks && onSources) onSources(gmeta.groundingChunks.filter(x => x.web).map(x => ({title: x.web.title || x.web.uri, url: x.web.uri})));
         }
       }
-      if (i > 0){ LS.set('gmodels', [gm, ...list.filter(x => x !== gm)]); }
+      if (i > 0){ LS.set('gmodels2', [gm, ...list.filter(x => x !== gm)]); }
       return gm;
     }catch(e){
       if (signal.aborted) throw e;
-      if (slow){ lastErr = new Error(gm + ' ne odgovara (20 s)'); LS.set('gmodels', [...list.filter(x => x !== gm), gm]); continue; }
+      if (slow){ lastErr = new Error(gm + ' ne odgovara (20 s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
       throw e;
     }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
   }
+  if (n429 && lastErr && /429/.test(lastErr.message)) throw new Error('Besplatni Gemini limit za danas je potrošen na svim modelima. Resetira se svaki dan u 9:00 ujutro (naše vrijeme). Do tada isključi 🌐 web ili pričekaj.');
   throw lastErr || new Error('Gemini nije dostupan');
 }
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
@@ -657,7 +667,7 @@ async function runAI(c){
     if (j.g) settings.gkey = j.g;
     if (j.t) settings.token = j.t;
     LS.set('settings', settings);
-    LS.set('gmodels', null);
+    LS.set('gmodels2', null);
     setTimeout(() => showErr('✅ Mobitel je povezan s tvojim NEXUS-om.'), 300);
   }catch(e){ setTimeout(() => showErr('Poveznica nije ispravna.'), 300); }
   history.replaceState(null, '', location.pathname);
@@ -683,7 +693,7 @@ $('#refreshK').onclick = () => loadKnowledge(true);
 $('#saveSet').onclick = () => {
   const oldKey = settings.gkey;
   settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
-  if (oldKey !== settings.gkey) LS.set('gmodels', null);
+  if (oldKey !== settings.gkey) LS.set('gmodels2', null);
   LS.set('settings', settings); $('#modal').classList.remove('show'); setReady(); loadKnowledge(true);
 };
 $('#expBtn').onclick = () => {
