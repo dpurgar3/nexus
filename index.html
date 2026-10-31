@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0d0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="ikona-192.png">
+<link rel="apple-touch-icon" href="ikona-192.png">
+<title>NEXUS AI</title>
+<style>
+:root{
+  --bg:#0d0f14; --panel:#151821; --panel2:#1c2030; --line:#262b3b;
+  --text:#e8eaf0; --muted:#8a90a6; --accent:#7c5cff; --accent2:#22d3ee;
+  --user:#23283a; --danger:#ef4444; --ok:#22c55e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+button{font:inherit;cursor:pointer}
+#app{display:flex;height:100vh;height:100dvh}
+/* sidebar */
+#side{width:270px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.brand{padding:18px 16px 12px;display:flex;align-items:center;gap:10px}
+.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-weight:800;color:#fff}
+.brand b{font-size:18px;letter-spacing:2px}
+.brand small{display:block;color:var(--muted);font-size:11px;letter-spacing:0}
+#newBtn{margin:4px 12px 10px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text)}
+#newBtn:hover{border-color:var(--accent)}
+#search{margin:0 12px 8px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+#convs{flex:1;overflow:auto;padding:0 8px}
+.conv{padding:9px 10px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer}
+.conv span{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.conv:hover{background:var(--panel2);color:var(--text)}
+.conv.active{background:var(--panel2);color:var(--text)}
+.conv .del{opacity:0;border:0;background:none;color:var(--muted);padding:0 4px}
+.conv:hover .del{opacity:1}
+.conv .del:hover{color:var(--danger)}
+.sidefoot{border-top:1px solid var(--line);padding:10px 12px;display:flex;flex-wrap:wrap;gap:6px}
+.sidefoot button{flex:1;padding:7px;border-radius:8px;border:1px solid var(--line);background:none;color:var(--muted);font-size:13px}
+.sidefoot button:hover{color:var(--text);border-color:var(--accent)}
+/* main */
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#top{display:flex;align-items:center;gap:10px;padding:10px 18px;border-bottom:1px solid var(--line)}
+#menuBtn{display:none;border:0;background:none;color:var(--text);font-size:20px}
+#status{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--danger)}
+#dot.on{background:var(--ok)}
+#clock{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+#idxBtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:12px;padding:5px 8px;border-radius:8px;cursor:pointer;white-space:nowrap}
+#idxBtn:hover{color:var(--text);border-color:var(--accent)}
+#model{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text)}
+#msgs{flex:1;overflow:auto;padding:24px 0}
+.wrap{max-width:820px;margin:0 auto;padding:0 20px}
+.msg{display:flex;gap:12px;margin:0 0 22px}
+.av{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:700}
+.msg.ai .av{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.msg.user .av{background:var(--user);color:var(--muted)}
+.body{flex:1;min-width:0}
+.msg.user .bubble{background:var(--user);padding:10px 14px;border-radius:12px;display:inline-block;white-space:pre-wrap;max-width:100%}
+.bubble p{margin:0 0 10px}.bubble p:last-child{margin:0}
+.bubble pre{background:#0a0c10;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:13px}
+.bubble code{font-family:Consolas,monospace;background:#0a0c10;padding:1px 5px;border-radius:4px;font-size:13px}
+.bubble pre code{background:none;padding:0}
+.bubble ul,.bubble ol{margin:0 0 10px;padding-left:22px}
+.bubble h1,.bubble h2,.bubble h3{margin:12px 0 8px;font-size:16px}
+.bubble table{border-collapse:collapse;margin:0 0 10px}
+.bubble td,.bubble th{border:1px solid var(--line);padding:4px 8px}
+.tools{margin-top:6px;display:flex;gap:8px}
+.tools button{border:0;background:none;color:var(--muted);font-size:12px;padding:2px 4px}
+.tools button:hover{color:var(--text)}
+.thumbs img{max-height:120px;border-radius:8px;margin:6px 6px 0 0;border:1px solid var(--line)}
+.att{font-size:12px;color:var(--accent2);margin-top:4px}
+.cursor::after{content:"▍";animation:b 1s infinite;color:var(--accent2)}
+@keyframes b{50%{opacity:0}}
+#welcome{text-align:center;margin-top:12vh;color:var(--muted)}
+#welcome h1{color:var(--text);font-size:30px;letter-spacing:4px;margin:14px 0 6px}
+#welcome .logo{width:64px;height:64px;font-size:26px;margin:auto;border-radius:18px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:22px}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:8px 12px;border-radius:20px;font-size:13px}
+.chip:hover{border-color:var(--accent)}
+/* input */
+#bottom{padding:10px 0 16px}
+#box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px}
+#box:focus-within{border-color:var(--accent)}
+#pending{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-size:12px;background:var(--panel2);border-radius:6px;padding:3px 8px;display:flex;gap:6px;align-items:center}
+.pill button{border:0;background:none;color:var(--muted);padding:0}
+#inp{width:100%;border:0;outline:0;resize:none;background:none;color:var(--text);font:inherit;max-height:220px;padding:6px}
+.row{display:flex;align-items:center;gap:6px}
+.ib{border:0;background:none;color:var(--muted);font-size:18px;padding:4px 8px;border-radius:8px}
+.ib:hover{color:var(--text);background:var(--panel2)}
+.act{border:1px solid var(--accent);border-radius:12px;padding:10px 12px;margin:8px 0;background:var(--panel)}
+.act h4{margin:0 0 6px;font-size:14px}
+.act .row2{font-size:13px;color:var(--muted);white-space:pre-wrap;margin:2px 0}
+.act .row2 b{color:var(--text)}
+.act .btns{display:flex;gap:8px;margin-top:8px}
+.act .btns button{border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+.act .ok{background:var(--ok);color:#000}.act .no{background:var(--panel2);color:var(--text)}
+.act .st{font-size:13px;margin-top:6px}
+#micBtn.rec{color:#fff;background:var(--danger);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.6)}50%{box-shadow:0 0 0 7px rgba(239,68,68,0)}}
+.ib.web{font-size:13px;border:1px solid var(--line)}
+.ib.web.on{color:var(--accent2);border-color:var(--accent2)}
+.att a{color:var(--accent2);margin-right:8px}
+#send{margin-left:auto;border:0;background:var(--accent);color:#fff;border-radius:10px;padding:8px 16px;font-weight:600}
+#send.stop{background:var(--danger)}
+.hint{text-align:center;font-size:11px;color:var(--muted);margin-top:6px}
+/* modal */
+#modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;padding:16px;z-index:9}
+#modal.show{display:flex}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(640px,100%);padding:20px;max-height:90vh;overflow:auto}
+.card h2{margin:0 0 12px;font-size:18px}
+.card label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+.card textarea,.card input{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
+.card textarea{min-height:240px}
+.card .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.card .acts button{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:none;color:var(--text)}
+.card .acts .pri{background:var(--accent);border-color:var(--accent);color:#fff}
+#err{display:none;background:#3a1418;border:1px solid #7f1d1d;color:#fecaca;padding:10px 14px;border-radius:10px;margin:0 auto 12px;max-width:780px;font-size:13px}
+@media(max-width:760px){
+  #side{position:fixed;inset:0 auto 0 0;z-index:5;transform:translateX(-100%);transition:.2s}
+  #side.open{transform:none}
+  #menuBtn{display:block}
+}
+#top{padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top))}
+#bottom{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.wrap{padding:0 12px}
+#inp{font-size:16px}
+#micBtn{font-size:22px;width:46px;height:46px;border-radius:50%;background:var(--panel2);color:var(--text)}
+#send{padding:10px 18px}
+.ib.web{font-size:12px}
+.tools button{padding:6px 6px}
+#welcome{margin-top:6vh}
+.conv .del{opacity:1}
+#setup{max-width:520px;margin:6vh auto;padding:0 16px;text-align:center;color:var(--muted)}
+#setup h1{color:var(--text);letter-spacing:4px}
+#setup .logo{width:64px;height:64px;font-size:26px;margin:auto;border-radius:18px}
+#setup input{width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:16px}
+#setup button{margin-top:10px;padding:10px 18px;border-radius:10px;border:0;background:var(--accent);color:#fff;font-weight:600}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="brand"><div class="logo">N</div><div><b>NEXUS AI</b><small>osobni asistent · mobitel</small></div></div>
+    <button id="newBtn">＋ Novi razgovor</button>
+    <input id="search" placeholder="Traži razgovore…">
+    <div id="convs"></div>
+    <div class="sidefoot">
+      <button id="setBtn">⚙ Postavke</button>
+      <button id="expBtn">⤓ Spremi</button>
+      <button id="impBtn">⤒ Učitaj</button>
+    </div>
+  </aside>
+  <main id="main">
+    <div id="top">
+      <button id="menuBtn">☰</button>
+      <div id="status"><div id="dot"></div><span id="stxt">Spajanje…</span></div>
+      <span id="clock"></span>
+    </div>
+    <div id="msgs"><div class="wrap" id="list"></div></div>
+    <div id="err"></div>
+    <div id="bottom"><div class="wrap">
+      <div id="box">
+        <div id="pending"></div>
+        <textarea id="inp" rows="1" placeholder="Pitaj NEXUS bilo što…"></textarea>
+        <div class="row">
+          <button class="ib" id="camBtn" title="Fotografiraj">📷</button>
+          <button class="ib" id="attBtn" title="Priloži sliku ili datoteku">📎</button>
+          <button class="ib web" id="webBtn" title="Pretraga interneta">🌐</button>
+          <button class="ib" id="micBtn" title="Govori">🎤</button>
+          <button id="send">Pošalji</button>
+        </div>
+      </div>
+    </div></div>
+  </main>
+</div>
+<input type="file" id="file" multiple hidden accept="image/*,.txt,.md,.csv,.json">
+<input type="file" id="cam" hidden accept="image/*" capture="environment">
+<input type="file" id="impFile" hidden accept=".json,application/json">
+
+<div id="modal"><div class="card">
+  <h2>Postavke NEXUS-a</h2>
+  <label>Gemini API ključ</label>
+  <input id="gkeyTxt" type="password" placeholder="zalijepi ključ" autocomplete="off">
+  <label>NEXUS ključ (za kalendar, mail, kontakte i znanje)</label>
+  <input id="tokTxt" type="password" autocomplete="off">
+  <label>Dodatne upute za NEXUS (neobavezno)</label>
+  <textarea id="sysTxt" style="min-height:120px"></textarea>
+  <label>Kreativnost (0 = precizno, 1 = maštovito)</label>
+  <input id="tempTxt" type="number" min="0" max="1.5" step="0.1">
+  <label><input type="checkbox" id="ttsChk" style="width:auto"> Automatski pročitaj odgovor naglas kad pitam glasom</label>
+  <div class="acts">
+    <button id="refreshK">↻ Osvježi znanje</button>
+    <button id="closeSet">Odustani</button>
+    <button class="pri" id="saveSet">Spremi</button>
+  </div>
+</div></div>
+<script>
+const BASE_SYS = `Ti si NEXUS AI, osobni AI asistent svog vlasnika (sve o njemu i njegovom poslu piše u bloku ZNANJE). Radiš na njegovom mobitelu.
+
+Kako radiš:
+- Uvijek odgovaraš na hrvatskom (osim kad traži drugi jezik).
+- Kratko i direktno, korak po korak. Na mobitelu je — bez dugih uvoda. Bez nepotrebnih opcija i teorije; daj najbolje rješenje koje radi.
+- Pomažeš oko objava za društvene mreže, ponuda, cjenika, e-mailova, prijevoda (njemački, engleski), ideja za evente i marketing, računanja i planiranja.
+- Ako nešto ne znaš, reci — ne izmišljaj. Za aktualne stvari koristi pretragu interneta kad je imaš.
+
+Radni modovi (kad ih spomene):
+- CEO mod: zanemari sitnice, daj 1–2 odluke s najvećim učinkom.
+- Sokratski mod: postavljaj jedno po jedno pitanje dok ne razumiješ problem, tek onda rješenje.
+- Kreativni direktor: odbaci generičke ideje, daj originalna rješenja.
+- Đavolji advokat: najjači argument protiv odluke.
+- Red team: pronađi sve rupe i rizike, ne slaži se iz ljubaznosti.`;
+const $ = s => document.querySelector(s);
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem('nexus_'+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
+  set(k, v){ try{ localStorage.setItem('nexus_'+k, JSON.stringify(v)); }catch(e){ showErr('Spremanje nije uspjelo (memorija preglednika puna?). Spremi razgovore gumbom "Spremi".'); } }
+};
+let settings = LS.get('settings', {sys: '', temp: 0.6, tts: true});
+let convs = LS.get('convs', []);
+let currentId = LS.get('current', null);
+let pending = [];
+let controller = null;
+let webPref = LS.get('web2', true);
+let knowledge = LS.get('znanje', []);
+let lastVoice = false;
+const GTOKEN_GET = () => settings.token || '';
+function save(){ LS.set('convs', convs); LS.set('current', currentId); }
+function cur(){ return convs.find(c => c.id === currentId); }
+function showErr(t){ const e=$('#err'); e.textContent=t; e.style.display='block'; const ok = /^✅|^Učitano|^Znanje osvježeno/.test(t); e.style.background = ok ? '#0f2a1a' : ''; e.style.borderColor = ok ? '#166534' : ''; e.style.color = ok ? '#bbf7d0' : ''; clearTimeout(showErr.t); showErr.t=setTimeout(()=>e.style.display='none', 9000); }
+function esc(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------- mini markdown (radi offline) ---------- */
+function inline(s){
+  return s.replace(/`([^`]+)`/g,'<code>$1</code>')
+          .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+          .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>')
+          .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" style="color:var(--accent2)">$1</a>');
+}
+function md(src){
+  const parts = esc(src).split(/```/);
+  let out = '';
+  parts.forEach((p, i) => {
+    if (i % 2){ out += '<pre><code>' + p.replace(/^[a-zA-Z0-9+-]*\n/, '') + '</code></pre>'; return; }
+    const lines = p.split('\n'); let list = null, para = [], table = [];
+    const flushP = () => { if (para.length){ out += '<p>' + inline(para.join('<br>')) + '</p>'; para = []; } };
+    const flushL = () => { if (list){ out += '</' + list + '>'; list = null; } };
+    const flushT = () => { if (table.length){
+        out += '<table>' + table.filter(r => !/^\|?\s*:?-+/.test(r)).map((r, ri) => '<tr>' + r.replace(/^\||\|$/g,'').split('|').map(c => (ri? '<td>':'<th>') + inline(c.trim()) + (ri? '</td>':'</th>')).join('') + '</tr>').join('') + '</table>';
+        table = []; } };
+    for (const l of lines){
+      let m;
+      if (/^\s*\|.*\|\s*$/.test(l)){ flushP(); flushL(); table.push(l.trim()); continue; } else flushT();
+      if ((m = l.match(/^(#{1,3})\s+(.*)/))){ flushP(); flushL(); out += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+      else if ((m = l.match(/^\s*[-*•]\s+(.*)/))){ flushP(); if (list !== 'ul'){ flushL(); out += '<ul>'; list = 'ul'; } out += '<li>' + inline(m[1]) + '</li>'; }
+      else if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))){ flushP(); if (list !== 'ol'){ flushL(); out += '<ol>'; list = 'ol'; } out += '<li>' + inline(m[1]) + '</li>'; }
+      else if (!l.trim()){ flushP(); flushL(); }
+      else { flushL(); para.push(l); }
+    }
+    flushP(); flushL(); flushT();
+  });
+  return out;
+}
+
+function renderConvs(){
+  const q = $('#search').value.toLowerCase();
+  $('#convs').innerHTML = '';
+  convs.filter(c => !q || c.title.toLowerCase().includes(q) || c.messages.some(m => m.content.toLowerCase().includes(q)))
+    .sort((a,b) => b.updated - a.updated)
+    .forEach(c => {
+      const d = document.createElement('div');
+      d.className = 'conv' + (c.id === currentId ? ' active' : '');
+      d.innerHTML = `<span>${esc(c.title)}</span><button class="del" title="Obriši">✕</button>`;
+      d.onclick = () => { currentId = c.id; save(); renderAll(); $('#side').classList.remove('open'); };
+      d.querySelector('.del').onclick = e => {
+        e.stopPropagation();
+        if (!confirm('Obrisati razgovor "' + c.title + '"?')) return;
+        convs = convs.filter(x => x.id !== c.id);
+        if (currentId === c.id) currentId = null;
+        save(); renderAll();
+      };
+      $('#convs').appendChild(d);
+    });
+}
+const ACT_RE = /```nexus-akcija\s*([\s\S]*?)(```|$)/g;
+function parseActs(t){ const out = []; let x; ACT_RE.lastIndex = 0; while ((x = ACT_RE.exec(t || ''))){ try{ out.push(JSON.parse(x[1].trim())); }catch(e){} } return out; }
+function stripActs(t){ return (t || '').replace(ACT_RE, '').trim(); }
+function accUrl(acc){
+  const urls = gUrls(); const want = /dpurgar/i.test(acc || '') ? 'dpurgar3' : 'artistdrazen';
+  return urls.find(u => gName(u).includes(want)) || urls[0];
+}
+function actCard(m, a, i){
+  const st = m.acts && m.acts[i];
+  const acc = /dpurgar/i.test(a.racun || '') ? 'dpurgar3@gmail.com' : 'artistdrazen@gmail.com';
+  let h = '';
+  if (a.radnja === 'termin'){
+    h = `<h4>📅 Novi termin u kalendaru (${acc})</h4><div class="row2"><b>${esc(a.naslov || '')}</b></div><div class="row2">🕒 ${esc(a.pocetak || '')}${a.kraj ? ' → ' + esc(a.kraj) : ''}</div>` + (a.mjesto ? `<div class="row2">📍 ${esc(a.mjesto)}</div>` : '') + (a.opis ? `<div class="row2">${esc(a.opis)}</div>` : '');
+  } else if (a.radnja === 'mail' || a.radnja === 'nacrt'){
+    h = `<h4>${a.radnja === 'mail' ? '✉️ Slanje maila' : '📝 Nacrt maila u Gmailu'} (s ${acc})</h4><div class="row2">Za: <b>${esc(a.za || '?')}</b>${a.cc ? ' · cc: ' + esc(a.cc) : ''}</div><div class="row2">Naslov: <b>${esc(a.naslov || '')}</b></div><div class="row2">${esc(a.tekst || '')}</div><div class="row2"><i>+ tvoj potpis</i></div>`;
+  } else return '';
+  const label = a.radnja === 'mail' ? '✅ Potvrdi i pošalji' : a.radnja === 'nacrt' ? '✅ Spremi nacrt' : '✅ Potvrdi i dodaj';
+  return `<div class="act">${h}` + (st ? `<div class="st">${esc(st)}</div>` : `<div class="btns"><button class="ok" data-ok="${i}">${label}</button><button class="no" data-no="${i}">✖ Odustani</button></div>`) + '</div>';
+}
+async function runAct(m, a, i, el){
+  const btn = el.querySelector(`[data-ok="${i}"]`); if (btn){ btn.disabled = true; btn.textContent = '⏳ Radim…'; }
+  m.acts = m.acts || {};
+  try{
+    const r = await fetch(accUrl(a.racun), {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(Object.assign({token: GTOKEN_GET()}, a)), signal: AbortSignal.timeout(30000)});
+    const j = await r.json();
+    m.acts[i] = j.ok ? '✅ ' + j.poruka : '⚠️ Greška: ' + j.error;
+  }catch(e){ m.acts[i] = '⚠️ Greška: ' + e.message; }
+  save(); renderAll();
+}
+function actsHelp(){
+  if (!gUrls().length) return '';
+  return '\n\nRADNJE (kalendar i Gmail): Kad Dražen traži da dodaš termin u kalendar, pošalješ mail ili spremiš nacrt maila, NIKAD ne tvrdi da je već napravljeno. Napiši jednu kratku rečenicu i na kraju dodaj točno ovakav blok (JSON), a Dražen će kliknuti Potvrdi:\n```nexus-akcija\n{"radnja":"termin","racun":"artistdrazen","naslov":"Sastanak s dobavljačem","pocetak":"2026-11-03T18:00","kraj":"2026-11-03T19:00","mjesto":"NOMAd","opis":""}\n```\nZa mail: {"radnja":"mail","racun":"artistdrazen","za":"ime@primjer.hr","naslov":"...","tekst":"Poštovani,\\n\\n..."}. Ako traži samo nacrt, "radnja":"nacrt". Datum bez sata ("2026-11-03") = cijeli dan. Računi: "artistdrazen" (poslovni, zadani) ili "dpurgar3" (samo ako to izričito traži). Adresu primatelja uzmi iz [GOOGLE KONTAKTI] ili iz poruke — ako je nemaš, pitaj, nikad je ne izmišljaj. Potpis ne piši, dodaje se sam. Mail piši uljudno, na hrvatskom osim ako traži drugi jezik.';
+}
+function msgEl(m, idx){
+  const d = document.createElement('div');
+  d.className = 'msg ' + (m.role === 'user' ? 'user' : 'ai');
+  const acts = m.role === 'user' ? [] : parseActs(m.content);
+  const body = m.role === 'user' ? `<div class="bubble">${esc(m.content)}</div>` : `<div class="bubble">${md(stripActs(m.content))}</div>` + acts.map((a, i) => actCard(m, a, i)).join('');
+  let extra = '';
+  if (m.images && m.images.length) extra += '<div class="thumbs">' + m.images.map(b => `<img src="data:image/*;base64,${b}">`).join('') + '</div>';
+  if (m.files && m.files.length) extra += '<div class="att">📄 ' + m.files.map(esc).join(', ') + '</div>';
+  if (m.role !== 'user' && m.sources && m.sources.length) extra += '<div class="att">🌐 Izvori: ' + m.sources.map(x => `<a href="${esc(x.url)}" target="_blank" title="${esc(x.url)}">${/^file:/.test(x.url) ? '📁 ' : ''}${esc((x.title || x.url).slice(0, 50))}</a>`).join('') + '</div>';
+  const tools = m.role === 'user' ? '' : `<div class="tools"><button data-a="copy">⧉ Kopiraj</button><button data-a="say">🔊</button>${idx !== undefined ? '<button data-a="regen">↻ Ponovi</button>' : ''}${m.stats ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">⚡ ' + m.stats + '</span>' : ''}</div>`;
+  d.innerHTML = `<div class="av">${m.role === 'user' ? 'DP' : 'N'}</div><div class="body">${body}${extra}${tools}</div>`;
+  const cp = d.querySelector('[data-a=copy]');
+  if (cp) cp.onclick = () => { navigator.clipboard.writeText(stripActs(m.content)); cp.textContent = '✓ Kopirano'; setTimeout(() => cp.textContent = '⧉ Kopiraj', 1500); };
+  const rg = d.querySelector('[data-a=regen]');
+  if (rg) rg.onclick = () => regen(idx);
+  const sy = d.querySelector('[data-a=say]');
+  if (sy) sy.onclick = () => speak(stripActs(m.content));
+  d.querySelectorAll('.act [data-ok]').forEach(b => b.onclick = () => runAct(m, acts[+b.dataset.ok], +b.dataset.ok, d));
+  d.querySelectorAll('.act [data-no]').forEach(b => b.onclick = () => { m.acts = m.acts || {}; m.acts[b.dataset.no] = '✖ Odustao si.'; save(); renderAll(); });
+  return d;
+}
+function renderMsgs(){
+  const list = $('#list'); list.innerHTML = '';
+  const c = cur();
+  if (!c || !c.messages.length){
+    list.innerHTML = `<div id="welcome"><div class="logo">N</div><h1>NEXUS AI</h1><div>Bok, što radimo danas?</div>
+      <div class="chips">
+        <button class="chip">Napiši objavu za Facebook za petak navečer</button>
+        <button class="chip">Prevedi na njemački: Rezervacija je potvrđena</button>
+        <button class="chip">5 ideja za event u NOMAd-u ovaj mjesec</button>
+        <button class="chip">Što imam ovaj tjedan u kalendaru?</button>
+        <button class="chip">Imam li nepročitanih mailova?</button>
+      </div></div>`;
+    list.querySelectorAll('.chip').forEach(b => b.onclick = () => { $('#inp').value = b.textContent; send(); });
+    return;
+  }
+  const lastAi = c.messages.map(m => m.role).lastIndexOf('assistant');
+  c.messages.forEach((m, i) => list.appendChild(msgEl(m, i === lastAi ? i : undefined)));
+  scrollDown();
+}
+function renderAll(){ renderConvs(); renderMsgs(); }
+function scrollDown(){ const m = $('#msgs'); m.scrollTop = m.scrollHeight; }
+function toApi(m, isLast){
+  const o = {role: m.role, content: (isLast && m.apiContent) ? m.apiContent : (m.files && m.files.length && m.apiContent ? m.apiContent.slice(0, 6000) : m.content)};
+  if (isLast && m.images && m.images.length){ o.images = m.images; o.imgMimes = m.imgMimes; }
+  return o;
+}
+function apiHistory(c){
+  const msgs = c.messages.slice(0, -1).filter(m => m.content && m.content !== '_(prekinuto)_');
+  const recent = msgs.slice(-12);
+  return recent.map((m, i) => toApi(m, i === recent.length - 1));
+}
+function timeAnswer(t){
+  const x = (t || '').toLowerCase().trim().replace(/[?!.]+$/, '');
+  if (x.length > 45 || x.split(/\s+/).length > 5) return null;
+  if (/(radi|radio|otvoren|zatvara|utakmic|počinje|pocinje|kad|do kada|lokal|sutra|jučer|jucer)/.test(x)) return null;
+  const d = new Date(), Z = {timeZone:'Europe/Zagreb'};
+  const sat = d.toLocaleTimeString('hr-HR', Object.assign({hour:'2-digit', minute:'2-digit'}, Z));
+  const dan = d.toLocaleDateString('hr-HR', Object.assign({weekday:'long', day:'numeric', month:'long', year:'numeric'}, Z));
+  if (/(koliko je sati|koje je vrijeme sad|koliko je sad sati|koliko sati je|točno vrijeme|tocno vrijeme|koliko je ura|\bsat\??$)/.test(x)) return 'Sada je **' + sat + ' h** (' + dan + ').';
+  if (/(koji je (danas )?dan|koji je datum|koji je danas datum|koji je danas|koji smo dan|datum danas|današnji datum|danasnji datum)/.test(x)) return 'Danas je **' + dan + '**, ' + sat + ' h.';
+  return null;
+}
+function nowText(){
+  const d = new Date();
+  const dan = d.toLocaleDateString('hr-HR', {weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'Europe/Zagreb'});
+  const sat = d.toLocaleTimeString('hr-HR', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Zagreb'});
+  return 'TOČNO VRIJEME SADA (sat mobitela, Hrvatska): ' + dan + ', ' + sat + ' h. Kad te pitaju koliko je sati ili koji je dan, odgovori točno ovim podatkom.';
+}
+const CAL_RE = /(kalendar|raspored|termin|sastan|obavez|obvez|događaj|dogadaj|imam li (nešto|nesto|što|sto)|što imam|sto imam|rođendan|rodjendan|podsjetnik|zakazan|dogovoren)/i;
+const MAIL_RE = /(e-?mail|\bmail|pošt[aeiu]|\bpost[aeu]\b|inbox|gmail|pisao|pisala|poslao|poslala|javio|javila|poruk[aeu] od)/i;
+const CONT_RE = /(kontakt|imenik|broj (od|telefona|mobitela|mobitel)|telefon (od|za)|mobitel (od|za)|e-?mail (od|za|adres)|kako (da )?dobijem|nazvati|nazovem)/i;
+const GSTOP = /^(kalendar\S*|raspored\S*|termin\S*|sastan\S*|obavez\S*|obvez\S*|događaj\S*|dogadaj\S*|e-?mail\S*|mail\S*|pošt\S*|post[aeu]|inbox|gmail|poruk\S*|kontakt\S*|imenik\S*|broj\S*|telefon\S*|mobitel\S*|adres\S*|pisao|pisala|poslao|poslala|javio|javila|nazvati|nazovem|dobijem|imam|ima|imao|imala|moj\S*|tvoj\S*|nov\S*|zadnj\S*|posljednj\S*|nepročitan\S*|neprocitan\S*|ovaj|ovog|tjed\S*|mjesec\S*|sutra|danas|prekosutra|od|za|o|oko|li|što|sto|šta|nešto|nesto|pokaži|pokazi|reci|daj|koji|koja|koje|kojeg|kad|kada|gdje|je|su|me|mi|meni|sam|da|se|na|u|i|s|sa|tko|ko|pronađi|pronadi|nađi|nadi|nadji|traži|trazi|potraži|potrazi|molim|te|ti|sve|svi|mu|joj|im|ga|ju|bilo|ikakv\S*|neki|neka|neko)$/i;
+function gWords(t){ return t.replace(/[?!.,:;"„“()]/g, ' ').split(/\s+/).filter(w => w && !GSTOP.test(w)).join(' ').trim(); }
+function nameStem(t){ return t.split(' ').map(w => w.length > 4 && /[aeiuo]$/i.test(w) ? w.slice(0, -1) : w).join(' '); }
+function mailQuery(w){ const caps = w.split(' ').filter(x => /^[A-ZČĆŽŠĐ0-9]/.test(x)); return caps.length ? caps.join(' ') : w; }
+const DEFAULT_GURLS = 'https://script.google.com/macros/s/AKfycbyB27I2xPFKhTAHY6scH3rIVdc8G-gVGo4GjFWM6PSZ4YFdYTKZLs2gHsdYo1072Vmu/exec https://script.google.com/macros/s/AKfycbw8XOcHJDp7MBipA6ot3YXR-Zq6zj5bwxYjceh-ETVyBYAYiT7HtBA-a87NicWtmSK9/exec';
+const G_NAMES = {'AKfycbyB27I2xPFKhTAHY6scH3rIVdc8G': 'artistdrazen@gmail.com (poslovni)', 'AKfycbw8XOcHJDp7MBipA6ot3YXR': 'dpurgar3@gmail.com'};
+function gUrls(){ if (!GTOKEN_GET()) return []; return ((settings.gurl || '').trim() || DEFAULT_GURLS).split(/[\s,;]+/).filter(u => /^https:\/\/script\.google\.com\//.test(u)); }
+function gName(u){ for (const k in G_NAMES) if (u.includes(k)) return G_NAMES[k]; return 'Google račun'; }
+async function gCallAll(params){
+  const urls = gUrls();
+  const res = await Promise.allSettled(urls.map(u => gCall(u, params)));
+  const ok = [], errs = [];
+  res.forEach((x, i) => x.status === 'fulfilled' ? ok.push({acc: gName(urls[i]), j: x.value}) : errs.push(gName(urls[i]) + ': ' + x.reason.message));
+  if (!ok.length) throw new Error(errs.join('; '));
+  return ok;
+}
+async function gCall(url, params){
+  const u = url + '?token=' + encodeURIComponent(GTOKEN_GET()) + '&' + new URLSearchParams(params).toString();
+  const r = await fetch(u, {signal: AbortSignal.timeout(25000)});
+  const j = await r.json(); if (j.error) throw new Error(j.error); return j;
+}
+async function googleContext(text){
+  if (!gUrls().length) return null;
+  let t = '', used = [];
+  const low = text.toLowerCase();
+  const jobs = [];
+  if (CAL_RE.test(text)){
+    let dana = 7, pomak = 0;
+    if (/prekosutra/.test(low)){ pomak = 2; dana = 1; } else if (/sutra/.test(low)){ pomak = 1; dana = 1; } else if (/danas|večeras|veceras/.test(low)) dana = 1;
+    else if (/mjesec/.test(low)) dana = 31; else if (/(sljedeć|sljedec|idući|iduci) tjed/.test(low)){ pomak = 7; dana = 7; }
+    jobs.push(gCallAll({a:'kalendar', dana, pomak}).then(all => { used.push('kalendar'); all.forEach(({acc, j}) => {
+      t += '\n\n[GOOGLE KALENDAR — ' + acc + ' — od ' + j.od + ', ' + j.dana + ' dana]\n' + (j.dogadaji.length ? j.dogadaji.map(e => '- ' + e.kada + ' — ' + e.naslov + (e.mjesto ? ' @ ' + e.mjesto : '') + (e.opis ? ' (' + e.opis + ')' : '') + ' [' + e.kalendar + ']').join('\n') : '(nema događaja)') + '\n[KRAJ KALENDARA]';
+    }); }));
+  }
+  if (MAIL_RE.test(text) && !CONT_RE.test(text)){
+    const w = gWords(text);
+    let q = /nepročitan|neprocitan/.test(low) ? 'is:unread in:inbox' : (w ? mailQuery(w) + ' newer_than:365d' : 'in:inbox newer_than:3d');
+    jobs.push(gCallAll({a:'mail', q, n: w ? 6 : 8}).then(all => { used.push('mail'); all.forEach(({acc, j}) => {
+      t += '\n\n[GMAIL — ' + acc + ' — upit: ' + j.upit + ']\n' + (j.mailovi.length ? j.mailovi.map((m, i) => `(${i + 1}) ${m.datum}${m.neprocitano ? ' · NEPROČITANO' : ''}\nOd: ${m.od}\nZa: ${m.za}\nNaslov: ${m.naslov}\n${m.poruka}`).join('\n\n') : '(nema mailova za taj upit)') + '\n[KRAJ GMAILA]';
+    }); }));
+  }
+  if (CONT_RE.test(text) || /(pošalji|posalji|napiši|napisi|odgovori|nacrt).{0,25}(mail|e-mail|poruk)/i.test(text)){
+    const w = gWords(text.replace(/(pošalji|posalji|napiši|napisi|odgovori|nacrt)\S*/gi, ' ').replace(/\b(da|kako|neka|dolazi|dolazim|sutra|danas)\b.*$/i, ''));
+    jobs.push(gCallAll({a:'kontakti', q: nameStem(w)}).then(all => { used.push('kontakti'); all.forEach(({acc, j}) => {
+      t += '\n\n[GOOGLE KONTAKTI — ' + acc + ' — "' + w + '"]\n' + (j.kontakti.length ? j.kontakti.slice(0, 15).map(k => '- ' + k.ime + (k.tvrtka ? ' (' + k.tvrtka + ')' : '') + (k.telefoni.length ? ' · tel: ' + k.telefoni.join(', ') : '') + (k.emailovi.length ? ' · ' + k.emailovi.join(', ') : '') + (k.adresa ? ' · ' + k.adresa : '')).join('\n') : '(nema kontakta)') + '\n[KRAJ KONTAKATA]';
+    }); }));
+  }
+  if (!jobs.length) return null;
+  const res = await Promise.allSettled(jobs);
+  const errs = res.filter(x => x.status === 'rejected').map(x => x.reason.message);
+  if (errs.length) t += '\n\n[Google greška: ' + errs.join('; ').slice(0, 200) + ']';
+  return {text: t + '\nKoristi ove podatke iz Draženovog Google računa za odgovor. Ništa ne izmišljaj.', used};
+}
+const GAPI = 'https://generativelanguage.googleapis.com/v1beta/';
+async function geminiCandidates(){
+  const r = await fetch(GAPI + 'models?pageSize=200', {headers:{'x-goog-api-key': settings.gkey}, signal: AbortSignal.timeout(10000)});
+  const j = await r.json();
+  if (j.error) throw new Error('Gemini ključ ne radi (' + (j.error.status || r.status) + ')');
+  const names = (j.models || []).filter(x => (x.supportedGenerationMethods || []).includes('generateContent')).map(x => x.name.replace(/^models\//, ''));
+  const ver = n => parseFloat((n.match(/gemini-([\d.]+)/) || [0, 0])[1]);
+  const flash = names.filter(n => /^gemini-[\d.]+-flash$/.test(n)).sort((a, b) => ver(b) - ver(a));
+  const extra = ['gemini-flash-latest'].filter(n => names.includes(n));
+  const lite = names.filter(n => /^gemini-[\d.]+-flash-lite$/.test(n)).sort((a, b) => ver(b) - ver(a));
+  return [...flash, ...extra, ...lite];
+}
+async function runGemini(sys, hist, signal, onText, onSources, useWeb){
+  if (!settings.gkey) throw new Error('nema Gemini ključa');
+  let list = LS.get('gmodels', null);
+  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6)){ list = await geminiCandidates(); LS.set('gmodels', list); LS.set('gkeytail', settings.gkey.slice(-6)); }
+  if (!list.length) throw new Error('nema dostupnog Gemini modela');
+  const contents = [];
+  hist.forEach(m => {
+    const role = m.role === 'assistant' ? 'model' : 'user';
+    if (!contents.length && role === 'model') return;
+    const parts = [{text: m.content || ' '}];
+    (m.images || []).forEach((d, i) => parts.push({inline_data: {mime_type: (m.imgMimes && m.imgMimes[i]) || 'image/jpeg', data: d}}));
+    contents.push({role, parts});
+  });
+  const mkBody = (gm, fast) => { const gc = {temperature: Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? {thinkingBudget: 0} : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
+  let lastErr;
+  for (let i = 0; i < Math.min(list.length, 6); i++){
+    const gm = list[i];
+    // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
+    const ac = new AbortController(); let slow = false, got = false;
+    const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
+    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, 20000);
+    const call = b => fetch(GAPI + 'models/' + gm + ':streamGenerateContent?alt=sse', {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'x-goog-api-key': settings.gkey}, body: b});
+    try{
+      let r = await call(mkBody(gm, LS.get('gfast', true)));
+      if (!r.ok && useWeb && r.status === 400){ const tw = await r.clone().text(); if (/tool|search|ground/i.test(tw)){ useWeb = false; r = await call(mkBody(gm, LS.get('gfast', true))); } }
+      if (!r.ok && r.status !== 429 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
+      if (!r.ok){
+        const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
+        lastErr = new Error('Gemini ' + r.status + ' (' + gm + '): ' + msg.slice(0, 120));
+        if (r.status === 429 || r.status === 404 || r.status === 403 || r.status >= 500 || /quota|not found|free|overloaded/i.test(msg)) continue;
+        throw lastErr;
+      }
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true){
+        const {done, value} = await reader.read(); if (done) break;
+        buf += dec.decode(value, {stream:true});
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const l of lines){
+          if (!l.startsWith('data:')) continue;
+          let j; try{ j = JSON.parse(l.slice(5)); }catch(e){ continue; }
+          if (j.error) throw new Error('Gemini: ' + j.error.message);
+          const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
+          parts.forEach(p => { if (p.text && !p.thought){ got = true; onText(p.text); } });
+          const gmeta = j.candidates && j.candidates[0] && j.candidates[0].groundingMetadata;
+          if (gmeta && gmeta.groundingChunks && onSources) onSources(gmeta.groundingChunks.filter(x => x.web).map(x => ({title: x.web.title || x.web.uri, url: x.web.uri})));
+        }
+      }
+      if (i > 0){ LS.set('gmodels', [gm, ...list.filter(x => x !== gm)]); }
+      return gm;
+    }catch(e){
+      if (signal.aborted) throw e;
+      if (slow){ lastErr = new Error(gm + ' ne odgovara (20 s)'); LS.set('gmodels', [...list.filter(x => x !== gm), gm]); continue; }
+      throw e;
+    }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
+  }
+  throw lastErr || new Error('Gemini nije dostupan');
+}
+function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
+
+async function send(){
+  if (controller){ controller.abort(); return; }
+  const text = $('#inp').value.trim();
+  if (!text && !pending.length) return;
+  let c = cur();
+  if (!c){ c = {id: Date.now().toString(36), title: (text || pending[0].name).slice(0, 48), messages: [], updated: Date.now()}; convs.push(c); currentId = c.id; }
+  const files = pending.filter(p => p.type === 'text');
+  const imgs = pending.filter(p => p.type === 'image');
+  const m = {role:'user', content: text || '(priloženo)'};
+  if (files.length){
+    m.files = files.map(f => f.name);
+    m.apiContent = m.content + '\n\n' + files.map(f => `--- Datoteka: ${f.name} ---\n${f.data}\n--- kraj ---`).join('\n\n');
+  }
+  if (imgs.length){ m.images = imgs.map(i => i.data); m.imgMimes = imgs.map(i => i.mime); }
+  c.messages.push(m); c.updated = Date.now();
+  $('#inp').value = ''; autosize(); pending = []; renderPending();
+  const tq = timeAnswer(text);
+  if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
+  save(); renderAll();
+  await runAI(c);
+}
+async function regen(idx){
+  const c = cur(); if (!c || controller) return;
+  c.messages.splice(idx, 1); save(); renderMsgs();
+  await runAI(c);
+}
+/* ---------- prilozi ---------- */
+function renderPending(){
+  $('#pending').innerHTML = '';
+  pending.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'pill';
+    d.innerHTML = `${p.type === 'image' ? '🖼' : '📄'} ${esc(p.name)} <button>✕</button>`;
+    d.querySelector('button').onclick = () => { pending.splice(i, 1); renderPending(); };
+    $('#pending').appendChild(d);
+  });
+}
+function addFiles(list){
+  [...list].forEach(f => {
+    const rd = new FileReader();
+    if (f.type.startsWith('image/')){
+      rd.onload = () => { pending.push({type:'image', name:f.name, mime: f.type || 'image/jpeg', data: rd.result.split(',')[1]}); renderPending(); };
+      rd.readAsDataURL(f);
+    } else {
+      if (f.size > 400000){ showErr(f.name + ' je prevelika (max ~400 KB teksta).'); return; }
+      rd.onload = () => { pending.push({type:'text', name:f.name, data: rd.result}); renderPending(); };
+      rd.readAsText(f);
+    }
+  });
+}
+
+/* ---------- znanje (iz Google Drivea, mapa "znanje") ---------- */
+async function loadKnowledge(force){
+  if (!GTOKEN_GET()) return;
+  const age = Date.now() - LS.get('znanjeT', 0);
+  if (!force && knowledge.length && age < 6 * 3600 * 1000) return;
+  try{
+    const url = accUrl('artistdrazen');
+    const j = await gCall(url, {a: 'znanje'});
+    if (j.datoteke && j.datoteke.length){ knowledge = j.datoteke; LS.set('znanje', knowledge); LS.set('znanjeT', Date.now()); }
+    if (force) showErr('Znanje osvježeno: ' + knowledge.length + ' datoteka.');
+  }catch(e){ if (force) showErr('Znanje: ' + e.message); }
+  setReady();
+}
+function knowledgeText(){
+  if (!knowledge.length) return '';
+  let t = '\n\n===== ZNANJE O VLASNIKU I NJEGOVOM POSLU (koristi kad je relevantno; ne nabrajaj bez potrebe) =====\n';
+  let total = 0;
+  for (const f of knowledge){ if (total > 60000) break; t += '\n### ' + f.name + '\n' + f.text + '\n'; total += f.text.length; }
+  return t + '\n===== KRAJ ZNANJA =====';
+}
+
+/* ---------- glas: čitanje odgovora ---------- */
+function speak(t){
+  try{
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const clean = (t || '').replace(/```[\s\S]*?```/g, '').replace(/[*#`>|_]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').slice(0, 1500);
+    const u = new SpeechSynthesisUtterance(clean); u.lang = 'hr-HR'; u.rate = 1.05;
+    const v = speechSynthesis.getVoices().find(x => /^hr/i.test(x.lang)); if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+/* ---------- AI ---------- */
+function setStatus(on, t){ $('#dot').classList.toggle('on', on); $('#stxt').textContent = t; }
+function setReady(){
+  if (!settings.gkey){ setStatus(false, 'Treba Gemini ključ — ⚙ Postavke'); return; }
+  setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
+}
+function renderWeb(){ const b = $('#webBtn'); b.classList.toggle('on', webPref); b.textContent = webPref ? '🌐 UKLJ.' : '🌐 ISKLJ.'; }
+function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
+async function runAI(c){
+  if (!settings.gkey){ showErr('Upiši Gemini ključ u ⚙ Postavke.'); $('#setBtn').click(); return; }
+  const voice = lastVoice; lastVoice = false;
+  const last = c.messages[c.messages.length - 1];
+  const ai = {role:'assistant', content:''};
+  c.messages.push(ai);
+  const el = msgEl(ai); el.querySelector('.bubble').classList.add('cursor');
+  $('#list').appendChild(el); scrollDown();
+  controller = new AbortController(); setSending(true);
+  try{
+    if (last && last.role === 'user' && !last.gDone && gUrls().length && (CAL_RE.test(last.content) || MAIL_RE.test(last.content) || CONT_RE.test(last.content) || /(pošalji|posalji|napiši|napisi|nacrt).{0,25}(mail|e-mail|poruk)/i.test(last.content))){
+      const bubG = el.querySelector('.bubble');
+      bubG.innerHTML = '<i style="color:var(--muted)">📅 Gledam kalendar / mail / kontakte…</i>';
+      try{ const g = await googleContext(last.content); if (g){ last.apiContent = (last.apiContent || last.content) + g.text; last.sources = (last.sources || []).concat(g.used.map(u => ({title: 'Google ' + u, url: u === 'mail' ? 'https://mail.google.com' : u === 'kalendar' ? 'https://calendar.google.com' : 'https://contacts.google.com'}))); } }catch(e){ showErr('Google: ' + e.message); }
+      last.gDone = true; bubG.innerHTML = '';
+    }
+    if (last && last.sources) ai.sources = last.sources.slice();
+    const bub2 = el.querySelector('.bubble'); const t0 = Date.now(); let gotTok = false;
+    const tick = setInterval(() => { if (!gotTok) bub2.innerHTML = '<i style="color:var(--muted)">NEXUS razmišlja… ' + Math.round((Date.now() - t0) / 1000) + ' s</i>'; }, 1000);
+    const sys = BASE_SYS + (settings.sys ? '\n\nDODATNE UPUTE:\n' + settings.sys : '') + knowledgeText() + actsHelp() + '\n\n' + nowText();
+    const hist = apiHistory(c);
+    if (hist.length){ const lm = hist[hist.length - 1]; if (lm.role === 'user') lm.content = (lm.content || '') + '\n\n[' + nowText() + ']'; }
+    const onText = t => {
+      if (!gotTok){ gotTok = true; clearInterval(tick); }
+      ai.content += t;
+      el.querySelector('.bubble').innerHTML = md(stripActs(ai.content));
+      scrollDown();
+    };
+    const onSources = list => { const have = new Set((ai.sources || []).map(s => s.url)); ai.sources = (ai.sources || []).concat(list.filter(s => !have.has(s.url))).slice(0, 8); };
+    try{
+      const gm = await runGemini(sys, hist, controller.signal, onText, onSources, webPref && navigator.onLine);
+      ai.stats = '✨ ' + gm + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s';
+    } finally { clearInterval(tick); }
+  }catch(e){
+    if (e.name !== 'AbortError'){
+      const msg = /fetch|network|Failed/i.test(e.message) ? 'Nema veze s internetom ili Gemini ne odgovara. Pokušaj ponovno.' : e.message;
+      showErr(msg); if (!ai.content) ai.content = '⚠️ ' + msg;
+    }
+  }
+  ai.content = ai.content.trim() || '_(prekinuto)_';
+  c.updated = Date.now(); controller = null; setSending(false); save(); renderAll();
+  if (voice && settings.tts && ai.content && !/^⚠️/.test(ai.content)) speak(stripActs(ai.content));
+}
+
+/* ---------- povezivanje s računalom (QR / poveznica #povezi=...) ---------- */
+(function(){
+  const m = location.hash.match(/povezi=([^&]+)/);
+  if (!m) return;
+  try{
+    const j = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+    if (j.g) settings.gkey = j.g;
+    if (j.t) settings.token = j.t;
+    LS.set('settings', settings);
+    LS.set('gmodels', null);
+    setTimeout(() => showErr('✅ Mobitel je povezan s tvojim NEXUS-om.'), 300);
+  }catch(e){ setTimeout(() => showErr('Poveznica nije ispravna.'), 300); }
+  history.replaceState(null, '', location.pathname);
+})();
+
+/* ---------- događaji ---------- */
+function autosize(){ const t = $('#inp'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 180) + 'px'; }
+$('#inp').addEventListener('input', autosize);
+$('#inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !/Android|Mobi/i.test(navigator.userAgent)){ e.preventDefault(); send(); } });
+$('#send').onclick = send;
+$('#attBtn').onclick = () => $('#file').click();
+$('#camBtn').onclick = () => $('#cam').click();
+$('#file').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+$('#cam').onchange = e => { addFiles(e.target.files); e.target.value = ''; };
+$('#newBtn').onclick = () => { currentId = null; save(); renderAll(); $('#side').classList.remove('open'); };
+$('#search').oninput = renderConvs;
+$('#menuBtn').onclick = () => $('#side').classList.toggle('open');
+$('#msgs').addEventListener('click', () => $('#side').classList.remove('open'));
+$('#webBtn').onclick = () => { webPref = !webPref; LS.set('web2', webPref); renderWeb(); };
+$('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
+$('#closeSet').onclick = () => $('#modal').classList.remove('show');
+$('#refreshK').onclick = () => loadKnowledge(true);
+$('#saveSet').onclick = () => {
+  const oldKey = settings.gkey;
+  settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
+  if (oldKey !== settings.gkey) LS.set('gmodels', null);
+  LS.set('settings', settings); $('#modal').classList.remove('show'); setReady(); loadKnowledge(true);
+};
+$('#expBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify({convs}, null, 1)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'NEXUS-mobitel-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+};
+$('#impBtn').onclick = () => $('#impFile').click();
+$('#impFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { try{
+      const j = JSON.parse(rd.result); const ids = new Set(convs.map(c => c.id));
+      (j.convs || []).forEach(c => { if (!ids.has(c.id)) convs.push(c); });
+      if (j.settings && j.settings.gkey && !settings.gkey){ settings.gkey = j.settings.gkey; LS.set('settings', settings); }
+      save(); renderAll(); setReady(); showErr('Učitano.');
+    }catch(err){ showErr('Datoteka nije ispravna.'); } };
+  rd.readAsText(f); e.target.value = '';
+};
+window.addEventListener('online', setReady);
+window.addEventListener('offline', setReady);
+function tickClock(){
+  const d = new Date();
+  $('#clock').textContent = d.toLocaleDateString('hr-HR', {weekday:'short', day:'numeric', month:'numeric', timeZone:'Europe/Zagreb'}) + ' · ' + d.toLocaleTimeString('hr-HR', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Zagreb'});
+}
+tickClock(); setInterval(tickClock, 15000);
+renderAll(); renderWeb(); setReady(); loadKnowledge(false);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('speechSynthesis' in window) speechSynthesis.getVoices();
+
+// ---------- Glasovni unos (mikrofon) ----------
+(function(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = $('#micBtn'); let rec = null, on = false, base = '', finalTxt = '', failed = false;
+  const stop = () => { if (rec && on) rec.stop(); };
+  function start(){
+    if (!SR){ showErr('Ovaj preglednik ne podržava govor. Otvori NEXUS u Google Chromeu ili koristi mikrofon na tipkovnici.'); return; }
+    if (controller) return;
+    rec = new SR(); rec.lang = 'hr-HR'; rec.interimResults = true; rec.continuous = !/Android/i.test(navigator.userAgent); rec.maxAlternatives = 1;
+    base = $('#inp').value.trim(); finalTxt = ''; failed = false; let silence;
+    const arm = () => { clearTimeout(silence); silence = setTimeout(stop, 2500); };
+    try{ speechSynthesis.cancel(); }catch(x){}
+    rec.onstart = () => { on = true; btn.classList.add('rec'); btn.textContent = '⏺'; $('#inp').placeholder = 'Slušam… govori (klik na ⏺ za kraj)'; arm(); };
+    rec.onresult = e => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalTxt += (finalTxt ? ' ' : '') + t.trim(); else interim += t;
+      }
+      $('#inp').value = [base, finalTxt, interim.trim()].filter(Boolean).join(' '); autosize(); arm();
+    };
+    rec.onerror = e => {
+      failed = true;
+      const m = {'not-allowed': 'Mikrofon nije dopušten. Postavke preglednika → Postavke web-mjesta → Mikrofon → Dopusti.',
+                 'service-not-allowed': 'Mikrofon nije dopušten u ovom pregledniku.',
+                 'network': 'Prepoznavanje govora treba internet. Provjeri vezu ili koristi mikrofon na tipkovnici.',
+                 'no-speech': 'Nisam čuo ništa. Klikni 🎤 i govori.',
+                 'audio-capture': 'Ne nalazim mikrofon. Provjeri je li spojen i odabran u Windowsima.'}[e.error] || ('Greška mikrofona: ' + e.error);
+      showErr(m);
+    };
+    rec.onend = () => {
+      on = false; clearTimeout(silence); btn.classList.remove('rec'); btn.textContent = '🎤'; $('#inp').placeholder = 'Pitaj NEXUS bilo što…';
+      if (!failed && finalTxt && $('#inp').value.trim()){ lastVoice = true; send(); }
+    };
+    try{ rec.start(); }catch(err){ showErr('Mikrofon se ne može pokrenuti: ' + err.message); }
+  }
+  btn.onclick = () => on ? stop() : start();
+  document.addEventListener('keydown', e => { if (e.ctrlKey && (e.key === 'm' || e.key === 'M')){ e.preventDefault(); btn.click(); } });
+})();
+
+</script>
+</body>
+</html>
