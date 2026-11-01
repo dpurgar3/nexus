@@ -641,11 +641,25 @@ function mapDest(t){
   if (/^(gdje (sam|smo|se nalazim|se nalazimo)|moja lokacija|moju lokaciju|mene|ovdje)$/i.test(d)) d = '';
   return d;
 }
-function getPos(){
+// svježa GPS lokacija: prati položaj do 10 s i uzima najtočniji (prvi odgovor je često samo približan)
+function getPos(maxMs = 10000, goodAcc = 30){
   return new Promise(res => {
     if (!navigator.geolocation) return res(null);
-    navigator.geolocation.getCurrentPosition(p => res({lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy}), () => res(null), {enableHighAccuracy: true, timeout: 12000, maximumAge: 60000});
+    let best = null, done = false, id = null;
+    const finish = () => { if (done) return; done = true; if (id !== null) navigator.geolocation.clearWatch(id); clearTimeout(t); res(best); };
+    const t = setTimeout(finish, maxMs);
+    id = navigator.geolocation.watchPosition(p => {
+      const c = {lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy};
+      if (!best || c.acc < best.acc) best = c;
+      if (c.acc <= goodAcc) finish();
+    }, () => finish(), {enableHighAccuracy: true, maximumAge: 0, timeout: maxMs});
   });
+}
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+// navigacija uvijek od STVARNE trenutne lokacije (Google karte same prate GPS dok voziš)
+function navUrl(dest, mode){
+  if (IS_ANDROID && mode !== 'transit') return 'google.navigation:q=' + encodeURIComponent(dest) + '&mode=' + ({driving: 'd', walking: 'w', bicycling: 'b'}[mode] || 'd');
+  return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(dest) + '&travelmode=' + mode + '&dir_action=navigate';
 }
 async function reverseAddr(pos){
   try{
@@ -670,14 +684,15 @@ async function mapIntent(c, text){
       {label: '🗺️ Otvori u Google kartama', url: `https://www.google.com/maps/search/?api=1&query=${here}`},
       {label: '📤 Pošalji lokaciju', url: `https://wa.me/?text=${enc('Ovdje sam: https://maps.google.com/?q=' + here)}`}]};
   } else {
-    const dirUrl = m => `https://www.google.com/maps/dir/?api=1${here ? '&origin=' + here : ''}&destination=${enc(dest)}&travelmode=${m}`;
-    ai.content = '🧭 **Ruta do: ' + dest + '** — ' + modeTxt[mode] + (pos ? '' : ' _(lokaciju nisam dobio — Google karte će koristiti tvoju trenutnu)_') + '. Dodirni plavi gumb za navigaciju.';
+    const dirUrl = m => navUrl(dest, m);
+    ai.content = '🧭 **Ruta do: ' + dest + '** — ' + modeTxt[mode] + '. Dodirni plavi gumb — navigacija kreće od tvoje **trenutne GPS lokacije** i prati te dok voziš.' + (pos && pos.acc > 150 ? ' _(karta ispod je približna — GPS još nije precizan, ali navigacija će koristiti točan)_' : '');
     ai.map = {embed: here ? `https://maps.google.com/maps?saddr=${here}&daddr=${enc(dest)}&dirflg=${{walking:'w', bicycling:'b', transit:'r', driving:'d'}[mode]}&output=embed` : `https://maps.google.com/maps?q=${enc(dest)}&output=embed`,
       links: [{label: '▶ Pokreni navigaciju (' + modeTxt[mode] + ')', url: dirUrl(mode)}].concat(['driving', 'walking', 'transit'].filter(x => x !== mode).map(x => ({label: modeTxt[x], url: dirUrl(x)})))
         .concat([{label: '📍 Samo mjesto', url: `https://www.google.com/maps/search/?api=1&query=${enc(dest)}`}])};
   }
   ai.stats = '🗺️ karta';
   save(); renderAll();
+  if (dest && /(navigacij|navodi|vodi me|odvedi me|pokreni)/i.test(text)) setTimeout(() => { try{ window.location.href = navUrl(dest, mode); }catch(e){} }, 400);
   if (lastVoice && settings.tts) speak(ai.content.replace(/[*_]/g, '').replace(/\(.*?\)/g, ''));
   lastVoice = false;
   return true;
