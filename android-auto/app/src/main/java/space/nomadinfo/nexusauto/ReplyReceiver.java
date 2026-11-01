@@ -22,7 +22,7 @@ public class ReplyReceiver extends BroadcastReceiver {
         final PendingResult pr = goAsync();
         new Thread(() -> {
             try {
-                String answer = NexusCore.ask(c, NexusCore.history(c));
+                String answer = NexusCore.answer(c);
                 NexusCore.add(c, "model", answer);
                 NexusCore.post(c);
             } finally {

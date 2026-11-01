@@ -32,6 +32,8 @@ public class GoogleData {
     private static final int F = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     static final Pattern CAL = Pattern.compile("(kalendar|raspored|termin|sastan|obavez|obvez|događaj|dogadaj|imam li (nešto|nesto|što|sto)|što imam|sto imam|rođendan|rodjendan|podsjetnik|zakazan|dogovoren)", F);
     static final Pattern MAIL = Pattern.compile("(e-?mail|\\bmail|pošt[aeiu]|\\bpost[aeu]\\b|inbox|gmail|pisao|pisala|poslao|poslala|javio|javila|poruk[aeu] od)", F);
+    static final Pattern CONT = Pattern.compile("(kontakt|imenik|broj (od|telefona|mobitela|mobitel)|telefon (od|za)|mobitel (od|za)|e-?mail (od|za|adres)|kako (da )?dobijem|nazvati|nazovem)", F);
+    static final Pattern SEND = Pattern.compile("(pošalji|posalji|napiši|napisi|odgovori|nacrt).{0,25}(mail|e-mail|poruk)", F);
     static final Pattern STOP = Pattern.compile("^(kalendar\\S*|raspored\\S*|termin\\S*|sastan\\S*|obavez\\S*|obvez\\S*|događaj\\S*|dogadaj\\S*|e-?mail\\S*|mail\\S*|pošt\\S*|post[aeu]|inbox|gmail|poruk\\S*|kontakt\\S*|imenik\\S*|broj\\S*|telefon\\S*|mobitel\\S*|adres\\S*|pisao|pisala|poslao|poslala|javio|javila|nazvati|nazovem|dobijem|imam|ima|imao|imala|moj\\S*|tvoj\\S*|nov\\S*|zadnj\\S*|posljednj\\S*|nepročitan\\S*|neprocitan\\S*|ovaj|ovog|tjed\\S*|mjesec\\S*|sutra|danas|prekosutra|od|za|o|oko|li|što|sto|šta|nešto|nesto|pokaži|pokazi|reci|daj|koji|koja|koje|kojeg|kad|kada|gdje|je|su|me|mi|meni|sam|da|se|na|u|i|s|sa|tko|ko|pronađi|pronadi|nađi|nadi|nadji|traži|trazi|potraži|potrazi|molim|te|ti|sve|svi|mu|joj|im|ga|ju|bilo|ikakv\\S*|neki|neka|neko)$", F);
 
     private static final ExecutorService POOL = Executors.newCachedThreadPool();
@@ -168,7 +170,38 @@ public class GoogleData {
             }
         }
 
-        if (MAIL.matcher(q).find()) {
+        if (CONT.matcher(q).find() || SEND.matcher(q).find()) {
+            String w = words(q.replaceAll("(?iu)(pošalji|posalji|napiši|napisi|odgovori|nacrt)\\S*", " ")
+                    .replaceAll("(?iu)(^|\\s)(da|kako|neka|dolazi|dolazim|sutra|danas)(\\s.*)?$", " "));
+            StringBuilder stem = new StringBuilder();
+            for (String x : w.split(" ")) {
+                if (x.isEmpty()) continue;
+                if (stem.length() > 0) stem.append(' ');
+                stem.append(x.length() > 4 && "aeiouAEIOU".indexOf(x.charAt(x.length() - 1)) >= 0 ? x.substring(0, x.length() - 1) : x);
+            }
+            final String who = w;
+            final String params = "a=kontakti&q=" + enc(stem.toString());
+            if (stem.length() > 0) for (final String[] acc : ACC) {
+                jobs.add(POOL.submit(() -> {
+                    JSONObject j = call(acc[0], tok, params);
+                    StringBuilder sb = new StringBuilder("\n\n[GOOGLE KONTAKTI — " + acc[1] + " — \"" + who + "\"]\n");
+                    JSONArray k = j.optJSONArray("kontakti");
+                    if (k == null || k.length() == 0) sb.append("(nema kontakta)\n");
+                    else for (int i = 0; i < k.length() && i < 15; i++) {
+                        JSONObject x = k.getJSONObject(i);
+                        sb.append("- ").append(x.optString("ime"));
+                        if (!x.optString("tvrtka").isEmpty()) sb.append(" (").append(x.optString("tvrtka")).append(')');
+                        JSONArray tel = x.optJSONArray("telefoni"), em = x.optJSONArray("emailovi");
+                        if (tel != null && tel.length() > 0) sb.append(" · tel: ").append(join(tel));
+                        if (em != null && em.length() > 0) sb.append(" · ").append(join(em));
+                        sb.append('\n');
+                    }
+                    return sb.append("[KRAJ KONTAKATA]").toString();
+                }));
+            }
+        }
+
+        if (MAIL.matcher(q).find() && !CONT.matcher(q).find()) {
             String w = words(q);
             String mq;
             int n;
@@ -214,11 +247,71 @@ public class GoogleData {
         return out.toString();
     }
 
+    static String join(JSONArray a) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < a.length(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(a.optString(i));
+        }
+        return sb.toString();
+    }
+
+    static final String ACTS = "\n\nRADNJE (kalendar i Gmail): Kad Dražen traži da dodaš termin u kalendar, pošalješ mail ili spremiš nacrt maila, NIKAD ne tvrdi da je već napravljeno. "
+            + "On vozi, pa u jednoj ili dvije rečenice naglas ponovi što ćeš napraviti (za termin: naslov, dan i sat; za mail: kome, naslov i ukratko sadržaj) i završi s: Reci da ili ne. "
+            + "Na kraju odgovora dodaj točno ovakav blok (JSON), koji se ne čita naglas:\n```nexus-akcija\n{\"radnja\":\"termin\",\"racun\":\"artistdrazen\",\"naslov\":\"Sastanak s dobavljačem\",\"pocetak\":\"2026-11-03T18:00\",\"kraj\":\"2026-11-03T19:00\",\"mjesto\":\"NOMAd\",\"opis\":\"\"}\n```\n"
+            + "Za mail: {\"radnja\":\"mail\",\"racun\":\"artistdrazen\",\"za\":\"ime@primjer.hr\",\"naslov\":\"...\",\"tekst\":\"Poštovani,\\n\\n...\"}. Ako traži samo nacrt, \"radnja\":\"nacrt\". "
+            + "Datum bez sata (\"2026-11-03\") = cijeli dan. Ako kraj nije rečen, termin traje sat vremena. Računi: \"artistdrazen\" (poslovni, zadani) ili \"dpurgar3\" (samo ako to izričito traži). "
+            + "Adresu primatelja uzmi iz [GOOGLE KONTAKTI] ili iz poruke; ako je nemaš, pitaj i ne dodaj blok, nikad je ne izmišljaj. Potpis ne piši, dodaje se sam. Mail piši uljudno, na hrvatskom osim ako traži drugi jezik.";
+
+    /** Izvrši potvrđenu radnju (termin, mail, nacrt) preko Google skripte. */
+    static String runAction(Context c, String json) {
+        String tok = token(c);
+        if (tok.isEmpty()) return "Nemam NEXUS ključ pa ne mogu to napraviti.";
+        try {
+            JSONObject a = new JSONObject(json);
+            String base = a.optString("racun").toLowerCase(Locale.ROOT).contains("dpurgar") ? ACC[1][0] : ACC[0][0];
+            a.put("token", tok);
+            HttpURLConnection con = (HttpURLConnection) new URL(base).openConnection();
+            con.setInstanceFollowRedirects(false);
+            con.setConnectTimeout(8000);
+            con.setReadTimeout(20000);
+            con.setRequestMethod("POST");
+            con.setDoOutput(true);
+            con.setRequestProperty("Content-Type", "text/plain;charset=utf-8");
+            try (java.io.OutputStream os = con.getOutputStream()) {
+                os.write(a.toString().getBytes("UTF-8"));
+            }
+            int code = con.getResponseCode();
+            String s;
+            if (code >= 300 && code < 400 && con.getHeaderField("Location") != null) {
+                String loc = con.getHeaderField("Location");
+                con.disconnect();
+                HttpURLConnection g = (HttpURLConnection) new URL(loc).openConnection();
+                g.setConnectTimeout(8000);
+                g.setReadTimeout(20000);
+                int c2 = g.getResponseCode();
+                s = readAll(c2 < 400 ? g.getInputStream() : g.getErrorStream());
+                g.disconnect();
+            } else {
+                s = readAll(code < 400 ? con.getInputStream() : con.getErrorStream());
+                con.disconnect();
+            }
+            JSONObject j = new JSONObject(s);
+            if (j.optBoolean("ok")) return "Gotovo. " + j.optString("poruka");
+            return "Nije uspjelo: " + j.optString("error", "nepoznata greška");
+        } catch (Exception e) {
+            return "Nije uspjelo, nema veze s Googleom. Pokušaj kasnije.";
+        }
+    }
+
     static String now() {
         Locale hr = new Locale("hr", "HR");
         SimpleDateFormat f = new SimpleDateFormat("EEEE, d. MMMM yyyy., HH:mm", hr);
         f.setTimeZone(TimeZone.getTimeZone("Europe/Zagreb"));
-        return "\n\nTOČNO VRIJEME SADA (Hrvatska): " + f.format(new Date()) + " h.";
+        SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.ROOT);
+        iso.setTimeZone(TimeZone.getTimeZone("Europe/Zagreb"));
+        Date d = new Date();
+        return "\n\nTOČNO VRIJEME SADA (Hrvatska): " + f.format(d) + " h (" + iso.format(d) + ").";
     }
 
     private static String readAll(InputStream in) throws Exception {

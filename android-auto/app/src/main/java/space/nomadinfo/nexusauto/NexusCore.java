@@ -131,7 +131,9 @@ public class NexusCore {
             a.put(new JSONObject().put("r", "user").put("t", question));
         } catch (Exception ignored) {
         }
-        return ask(c, a);
+        String r = ask(c, a);
+        prefs(c).edit().remove("akcija").commit();
+        return r;
     }
 
     static String ask(Context c, JSONArray msgs) {
@@ -148,6 +150,7 @@ public class NexusCore {
         String know = GoogleData.knowledgeQuick(c);
         if (!know.isEmpty()) sb.append("\n\n===== ZNANJE O VLASNIKU I NJEGOVOM POSLU (koristi kad je relevantno) =====").append(know).append("\n===== KRAJ ZNANJA =====");
         sb.append(GoogleData.context(c, lastQ, 10000));
+        if (!GoogleData.token(c).isEmpty()) sb.append(GoogleData.ACTS);
         sb.append(GoogleData.now());
         String sys = sb.toString();
 
@@ -174,7 +177,7 @@ public class NexusCore {
                     JSONObject body = new JSONObject();
                     body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", sys))));
                     body.put("contents", contents);
-                    JSONObject gc = new JSONObject().put("temperature", 0.5).put("maxOutputTokens", 800);
+                    JSONObject gc = new JSONObject().put("temperature", 0.5).put("maxOutputTokens", 1500);
                     if (v < 2) {
                         gc.put("thinkingConfig", model.contains("gemini-2.")
                                 ? new JSONObject().put("thinkingBudget", 0)
@@ -199,7 +202,7 @@ public class NexusCore {
                     con.disconnect();
                     if (code == 200) {
                         String t = extractText(resp);
-                        if (!t.isEmpty()) return clean(t);
+                        if (!t.isEmpty()) return clean(takeAction(c, t));
                         last = "prazan odgovor";
                         break;
                     }
@@ -217,6 +220,46 @@ public class NexusCore {
             }
         }
         return "Nisam dobio odgovor (" + last + "). Pokušaj ponovno.";
+    }
+
+    static final java.util.regex.Pattern ACT = java.util.regex.Pattern.compile("```\\s*nexus-akcija\\s*([\\s\\S]*?)(```|$)");
+    static final java.util.regex.Pattern YES = java.util.regex.Pattern.compile("^(da|dap|može|moze|potvrđujem|potvrdjujem|potvrdi|pošalji|posalji|ok|okej|u redu|dodaj|spremi|naravno|važi|vazi)([\\s,.!]|$)", java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE);
+    static final java.util.regex.Pattern NO = java.util.regex.Pattern.compile("^(ne|nemoj|odustani|stop|nije|nikako)([\\s,.!]|$)", java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE);
+
+    /** Izvadi blok s radnjom, spremi ga za potvrdu i vrati tekst za čitanje. */
+    static String takeAction(Context c, String t) {
+        java.util.regex.Matcher m = ACT.matcher(t);
+        String pending = "";
+        while (m.find()) {
+            try {
+                JSONObject a = new JSONObject(m.group(1).trim());
+                if (a.has("radnja")) pending = a.toString();
+            } catch (Exception ignored) {
+            }
+        }
+        String text = ACT.matcher(t).replaceAll("").trim();
+        if (!pending.isEmpty()) {
+            prefs(c).edit().putString("akcija", pending).commit();
+            if (!text.toLowerCase().contains("da ili ne")) text = text + " Reci da ili ne.";
+        }
+        return text;
+    }
+
+    /** Odgovor na zadnje pitanje: potvrda radnje ili novo pitanje za NEXUS. */
+    static String answer(Context c) {
+        JSONArray h = history(c);
+        String q = "";
+        for (int i = h.length() - 1; i >= 0; i--) {
+            JSONObject m = h.optJSONObject(i);
+            if (m != null && "user".equals(m.optString("r"))) { q = m.optString("t").trim(); break; }
+        }
+        String pending = prefs(c).getString("akcija", "");
+        if (!pending.isEmpty()) {
+            prefs(c).edit().remove("akcija").commit();
+            if (YES.matcher(q).find()) return GoogleData.runAction(c, pending);
+            if (NO.matcher(q).find()) return "U redu, odustao sam.";
+        }
+        return ask(c, h);
     }
 
     private static String readAll(InputStream in) throws Exception {
