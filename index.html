@@ -127,6 +127,10 @@ button{font:inherit;cursor:pointer}
 #bottom{padding-bottom:max(12px,env(safe-area-inset-bottom))}
 .wrap{padding:0 12px}
 #inp{font-size:16px}
+.calls{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.callBtn{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:600;font-size:16px;border:0;cursor:pointer}
+.callBtn small{font-weight:400;opacity:.9}
+.callBtn.alt{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
 #micBtn{font-size:22px;width:46px;height:46px;border-radius:50%;background:var(--panel2);color:var(--text)}
 #send{padding:10px 18px}
 .ib.web{font-size:12px}
@@ -339,6 +343,8 @@ function msgEl(m, idx){
   if (m.images && m.images.length) extra += '<div class="thumbs">' + m.images.map(b => `<img src="data:image/*;base64,${b}">`).join('') + '</div>';
   if (m.imgCount && !(m.images && m.images.length)) extra += '<div class="att">🖼 ' + m.imgCount + ' slika (uklonjena radi memorije)</div>';
   if (m.files && m.files.length) extra += '<div class="att">📄 ' + m.files.map(esc).join(', ') + '</div>';
+  if (m.calls && m.calls.length) extra += '<div class="calls">' + m.calls.map(x => `<a class="callBtn" href="tel:${esc(x.tel)}">📞 ${esc(x.ime)} <small>${esc(x.broj)}</small></a>`).join('') + '</div>';
+  if (m.pickContact) extra += '<div class="calls"><button class="callBtn alt" data-a="pick">📇 Odaberi iz imenika na mobitelu</button></div>';
   if (m.role !== 'user' && m.sources && m.sources.length) extra += '<div class="att">🌐 Izvori: ' + m.sources.map(x => `<a href="${esc(x.url)}" target="_blank" title="${esc(x.url)}">${/^file:/.test(x.url) ? '📁 ' : ''}${esc((x.title || x.url).slice(0, 50))}</a>`).join('') + '</div>';
   const tools = m.role === 'user' ? '' : `<div class="tools"><button data-a="copy">⧉ Kopiraj</button><button data-a="say">🔊</button>${idx !== undefined ? '<button data-a="regen">↻ Ponovi</button><button data-a="check">🔍 Provjeri</button>' : ''}${m.stats ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">⚡ ' + m.stats + '</span>' : ''}</div>`;
   d.innerHTML = `<div class="av">${m.role === 'user' ? 'DP' : 'N'}</div><div class="body">${body}${extra}${tools}</div>`;
@@ -348,6 +354,8 @@ function msgEl(m, idx){
   if (rg) rg.onclick = () => regen(idx);
   const ck = d.querySelector('[data-a=check]');
   if (ck) ck.onclick = () => verifyLast();
+  const pk = d.querySelector('[data-a=pick]');
+  if (pk) pk.onclick = () => pickAndCall(m);
   const sy = d.querySelector('[data-a=say]');
   if (sy) sy.onclick = () => speak(stripActs(m.content));
   d.querySelectorAll('.act [data-ok]').forEach(b => b.onclick = () => runAct(m, acts[+b.dataset.ok], +b.dataset.ok, d));
@@ -540,6 +548,71 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
 }
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
 
+/* ---------- pozivi: "nazovi Emanuelu Maurić" ---------- */
+const CALL_RE = /^\s*(nazovi|nazovite|pozovi|zovi|nazvati|nazovem|telefoniraj|okreni|zvrcni|birati|biraj)\s+(mi\s+|molim\s+te\s+)?(.+?)[\s.!?]*$/i;
+function telNorm(n){ let t = String(n || '').replace(/[^\d+]/g, ''); if (/^00/.test(t)) t = '+' + t.slice(2); return t; }
+function dial(tel){ try{ window.location.href = 'tel:' + tel; }catch(e){} }
+async function pickAndCall(m){
+  if (!('contacts' in navigator && navigator.contacts.select)){ showErr('Ovaj preglednik ne može otvoriti imenik. Dodaj kontakt u Google kontakte ili upiši broj: "nazovi 091 234 5678".'); return; }
+  try{
+    const res = await navigator.contacts.select(['name', 'tel'], {multiple: false});
+    if (!res || !res.length || !res[0].tel || !res[0].tel.length){ showErr('Kontakt nema broj telefona.'); return; }
+    const ime = (res[0].name && res[0].name[0]) || 'kontakt';
+    m.calls = res[0].tel.map(t => ({ime, broj: t, tel: telNorm(t)})); m.pickContact = false;
+    save(); renderAll(); dial(m.calls[0].tel);
+  }catch(e){ showErr('Imenik: ' + e.message); }
+}
+async function callIntent(c, text){
+  const x = text.match(CALL_RE); if (!x) return false;
+  let who = x[3].replace(/\b(na mobitel|na mob|na telefon|na posao|privatno)\b/gi, '').trim();
+  const ai = {role:'assistant', content:''};
+  // izravno broj
+  const digits = who.replace(/[^\d+]/g, '');
+  if (digits.length >= 6 && /^[\d\s+\-\/()]+$/.test(who)){
+    ai.content = 'Otvaram biranje broja **' + who + '**. Pritisni zelenu slušalicu.';
+    ai.calls = [{ime: 'Nazovi', broj: who, tel: telNorm(who)}];
+    c.messages.push(ai); save(); renderAll(); dial(ai.calls[0].tel); return true;
+  }
+  ai.content = '📞 Tražim broj od **' + who + '**…';
+  c.messages.push(ai); save(); renderAll();
+  let found = [];
+  if (gUrls().length){
+    try{
+      const all = await gCallAll({a:'kontakti', q: nameStem(who)});
+      const seen = new Set();
+      all.forEach(({j}) => (j.kontakti || []).forEach(k => (k.telefoni || []).forEach(t => {
+        const broj = t.replace(/\s*\([^)]*\)\s*$/, '').trim(); const tel = telNorm(broj);
+        const vrsta = (t.match(/\(([^)]+)\)\s*$/) || [, ''])[1];
+        if (tel.length >= 6 && !seen.has(tel)){ seen.add(tel); found.push({ime: k.ime || who, broj: broj + (vrsta ? ' · ' + vrsta : ''), tel}); }
+      })));
+    }catch(e){ console.warn('kontakti', e); }
+  }
+  if (found.length > 1){
+    // najbolje podudaranje imena prvo
+    const w = nameStem(who).toLowerCase().split(/\s+/);
+    const score = f => w.filter(p => f.ime.toLowerCase().includes(p)).length;
+    found.sort((a, b) => score(b) - score(a));
+    const top = score(found[0]);
+    const best = found.filter(f => score(f) === top);
+    if (best.length === 1 || best.every(f => f.ime === best[0].ime)) found = best;
+  }
+  if (!found.length){
+    ai.content = 'Nisam našao **' + who + '** u tvojim Google kontaktima' + (gUrls().length ? '' : ' (mobitel još nije povezan s računalom)') + '. Odaberi kontakt iz imenika ili upiši broj, npr. „nazovi 091 234 5678“.';
+    ai.pickContact = true;
+  } else if (found.length === 1){
+    ai.content = 'Zovem **' + found[0].ime + '** (' + found[0].broj + '). Pritisni zelenu slušalicu.';
+    ai.calls = found;
+  } else {
+    ai.content = 'Našao sam više brojeva za **' + who + '**. Dodirni koji želiš nazvati:';
+    ai.calls = found.slice(0, 6);
+  }
+  ai.stats = '📞 kontakti';
+  save(); renderAll();
+  if (found.length === 1) dial(found[0].tel);
+  if (lastVoice && settings.tts) speak(ai.content.replace(/\*\*/g, '').replace(/\(.*?\)/g, ''));
+  lastVoice = false;
+  return true;
+}
 async function send(){
   if (controller){ controller.abort(); return; }
   const text = $('#inp').value.trim();
@@ -557,6 +630,7 @@ async function send(){
   if (imgs.length){ m.images = imgs.map(i => i.data); m.imgMimes = imgs.map(i => i.mime); }
   c.messages.push(m); c.updated = Date.now();
   $('#inp').value = ''; autosize(); pending = []; renderPending();
+  if (!files.length && !imgs.length && CALL_RE.test(text)){ if (await callIntent(c, text)) return; }
   const tq = timeAnswer(text);
   if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
   save(); renderAll();
