@@ -215,6 +215,7 @@ Kako radiš:
 - Uvijek odgovaraš na hrvatskom (osim kad traži drugi jezik).
 - Kratko i direktno, korak po korak. Na mobitelu je — bez dugih uvoda. Bez nepotrebnih opcija i teorije; daj najbolje rješenje koje radi.
 - Pomažeš oko objava za društvene mreže, ponuda, cjenika, e-mailova, prijevoda (njemački, engleski), ideja za evente i marketing, računanja i planiranja.
+- Navigacija/karta: NIKAD ne piši lažne linkove ili gumbe u uglatim zagradama. Ako nudiš navigaciju, napiši pravi link ovako: [▶ Pokreni navigaciju](https://www.google.com/maps/dir/?api=1&destination=MJESTO&travelmode=driving&dir_action=navigate) (MJESTO = naziv s + umjesto razmaka).
 - Ako nešto ne znaš, reci — ne izmišljaj. Za aktualne stvari koristi pretragu interneta kad je imaš.
 
 Radni modovi (kad ih spomene):
@@ -259,7 +260,12 @@ function inline(s){
   return s.replace(/`([^`]+)`/g,'<code>$1</code>')
           .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
           .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>')
-          .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" style="color:var(--accent2)">$1</a>');
+          .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" style="color:var(--accent2)">$1</a>')
+          .replace(/\[([^\]<]*?(?:navigacij|ruta|ruti|kart[aeiu])[^\]<]*?\s(?:do|prema|za)\s+([^\]<]+))\](?!\()/gi, (m0, lbl, d) => '<a class="navLink" href="' + navLinkUrl(d.replace(/&amp;/g, '&')) + '" style="color:var(--accent2);font-weight:600">▶ ' + lbl + '</a>');
+}
+function navLinkUrl(dest){
+  dest = dest.trim().replace(/[.!?]+$/, '');
+  return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(dest) + '&travelmode=driving&dir_action=navigate';
 }
 function md(src){
   const parts = esc(src).split(/```/);
@@ -722,6 +728,15 @@ async function send(){
   c.messages.push(m); c.updated = Date.now();
   $('#inp').value = ''; autosize(); pending = []; renderPending();
   if (!files.length && !imgs.length && CALL_RE.test(text)){ if (await callIntent(c, text)) return; }
+  if (!files.length && !imgs.length && /^(da|može|moze|ok|okej|hoću|hocu|ajde|aj|naravno|pokreni( ga| je)?|vodi me)[\s.!]*$/i.test(text)){
+    const prev = c.messages.slice(0, -1), lastAi = [...prev].reverse().find(x => x.role === 'assistant');
+    if (lastAi && /navigacij|ruta|ruti|na karti/i.test(lastAi.content || '')){
+      const lastU = [...prev].reverse().find(x => x.role === 'user' && !/^(da|može|moze|ok|okej|hoću|hocu|ajde|aj|naravno)/i.test(x.content));
+      const ut = lastU ? lastU.content.trim() : '';
+      const dest = ut ? (MAP_RE.test(ut) ? mapDest(ut) : ut.replace(/[?!.]+$/, '')) : '';
+      if (dest && await mapIntent(c, 'navigacija do ' + dest)) return;
+    }
+  }
   if (!files.length && !imgs.length && (MAP_RE.test(text) || isPlaceQuery(text)) && text.length < 120){ if (await mapIntent(c, text)) return; }
   const tq = timeAnswer(text);
   if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
