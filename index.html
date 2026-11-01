@@ -217,7 +217,7 @@ Radni modovi (kad ih spomene):
 const $ = s => document.querySelector(s);
 const LS = {
   get(k, d){ try{ const v = localStorage.getItem('nexus_'+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
-  set(k, v){ try{ localStorage.setItem('nexus_'+k, JSON.stringify(v)); }catch(e){ showErr('Spremanje nije uspjelo (memorija preglednika puna?). Spremi razgovore gumbom "Spremi".'); } }
+  set(k, v, quiet){ try{ localStorage.setItem('nexus_'+k, JSON.stringify(v)); return true; }catch(e){ if (!quiet) showErr('Spremanje nije uspjelo (memorija preglednika puna?). Spremi razgovore gumbom "Spremi".'); return false; } }
 };
 let settings = LS.get('settings', {sys: '', temp: 0.6, tts: true});
 let convs = LS.get('convs', []);
@@ -228,7 +228,19 @@ let webPref = LS.get('web2', true);
 let knowledge = LS.get('znanje', []);
 let lastVoice = false;
 const GTOKEN_GET = () => settings.token || '';
-function save(){ LS.set('convs', convs); LS.set('current', currentId); }
+function stripImgs(keepLast){
+  const all = [];
+  convs.forEach(c => c.messages.forEach(m => { if (m.images && m.images.length) all.push(m); }));
+  all.slice(0, keepLast ? -1 : undefined).forEach(m => { m.imgCount = m.images.length; delete m.images; delete m.imgMimes; });
+}
+function save(){
+  LS.set('current', currentId, true);
+  if (LS.set('convs', convs, true)) return;
+  stripImgs(true);  // makni starije slike, zadnju zadrži
+  if (LS.set('convs', convs, true)) return;
+  stripImgs(false); // makni sve slike
+  LS.set('convs', convs);
+}
 function cur(){ return convs.find(c => c.id === currentId); }
 function showErr(t){ const e=$('#err'); e.textContent=t; e.style.display='block'; const ok = /^✅|^Učitano|^Znanje osvježeno/.test(t); e.style.background = ok ? '#0f2a1a' : ''; e.style.borderColor = ok ? '#166534' : ''; e.style.color = ok ? '#bbf7d0' : ''; clearTimeout(showErr.t); showErr.t=setTimeout(()=>e.style.display='none', 9000); }
 function esc(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -325,6 +337,7 @@ function msgEl(m, idx){
   const body = m.role === 'user' ? `<div class="bubble">${esc(m.content)}</div>` : `<div class="bubble">${md(stripActs(m.content))}</div>` + acts.map((a, i) => actCard(m, a, i)).join('');
   let extra = '';
   if (m.images && m.images.length) extra += '<div class="thumbs">' + m.images.map(b => `<img src="data:image/*;base64,${b}">`).join('') + '</div>';
+  if (m.imgCount && !(m.images && m.images.length)) extra += '<div class="att">🖼 ' + m.imgCount + ' slika (uklonjena radi memorije)</div>';
   if (m.files && m.files.length) extra += '<div class="att">📄 ' + m.files.map(esc).join(', ') + '</div>';
   if (m.role !== 'user' && m.sources && m.sources.length) extra += '<div class="att">🌐 Izvori: ' + m.sources.map(x => `<a href="${esc(x.url)}" target="_blank" title="${esc(x.url)}">${/^file:/.test(x.url) ? '📁 ' : ''}${esc((x.title || x.url).slice(0, 50))}</a>`).join('') + '</div>';
   const tools = m.role === 'user' ? '' : `<div class="tools"><button data-a="copy">⧉ Kopiraj</button><button data-a="say">🔊</button>${idx !== undefined ? '<button data-a="regen">↻ Ponovi</button><button data-a="check">🔍 Provjeri</button>' : ''}${m.stats ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">⚡ ' + m.stats + '</span>' : ''}</div>`;
@@ -368,7 +381,7 @@ function toApi(m, isLast){
   return o;
 }
 function apiHistory(c){
-  const msgs = c.messages.slice(0, -1).filter(m => m.content && m.content !== '_(prekinuto)_');
+  const msgs = c.messages.slice(0, -1).filter(m => m.content && m.content !== '_(prekinuto)_' && !/^⚠️/.test(m.content));
   const recent = msgs.slice(-12);
   return recent.map((m, i) => toApi(m, i === recent.length - 1));
 }
@@ -564,11 +577,29 @@ function renderPending(){
     $('#pending').appendChild(d);
   });
 }
+function shrinkImg(dataUrl, type){
+  return new Promise(res => {
+    const fallback = () => res({mime: type || 'image/jpeg', data: dataUrl.split(',')[1]});
+    const img = new Image();
+    img.onload = () => {
+      try{
+        const MAX = 1600, k = Math.min(1, MAX / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        res({mime: 'image/jpeg', data: cv.toDataURL('image/jpeg', 0.82).split(',')[1]});
+      }catch(e){ fallback(); }
+    };
+    img.onerror = fallback;
+    img.src = dataUrl;
+  });
+}
 function addFiles(list){
   [...list].forEach(f => {
     const rd = new FileReader();
     if (f.type.startsWith('image/')){
-      rd.onload = () => { pending.push({type:'image', name:f.name, mime: f.type || 'image/jpeg', data: rd.result.split(',')[1]}); renderPending(); };
+      rd.onload = () => shrinkImg(rd.result, f.type).then(r => { pending.push({type:'image', name:f.name || 'slika.jpg', mime: r.mime, data: r.data}); renderPending(); });
       rd.readAsDataURL(f);
     } else {
       if (f.size > 400000){ showErr(f.name + ' je prevelika (max ~400 KB teksta).'); return; }
@@ -673,7 +704,7 @@ async function runAI(c){
       showErr(msg); if (!ai.content) ai.content = '⚠️ ' + msg;
     }
   }
-  ai.content = ai.content.trim() || '_(prekinuto)_';
+  ai.content = ai.content.trim() || (controller && controller.signal.aborted ? '_(prekinuto)_' : '⚠️ Gemini nije vratio odgovor. Klikni ↻ Ponovi.');
   c.updated = Date.now(); controller = null; setSending(false); save(); renderAll();
   if (voice && settings.tts && ai.content && !/^⚠️/.test(ai.content)) speak(stripActs(ai.content));
 }
