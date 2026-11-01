@@ -203,6 +203,7 @@ button{font:inherit;cursor:pointer}
   <input id="tempTxt" type="number" min="0" max="1.5" step="0.1">
   <label><input type="checkbox" id="ttsChk" style="width:auto"> Automatski pročitaj odgovor naglas kad pitam glasom</label>
   <div class="acts">
+    <button id="toAuto">🚗 NEXUS Auto</button>
     <button id="refreshK">↻ Osvježi znanje</button>
     <button id="closeSet">Odustani</button>
     <button class="pri" id="saveSet">Spremi</button>
@@ -924,6 +925,11 @@ renderQ();
 $('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
 $('#closeSet').onclick = () => $('#modal').classList.remove('show');
 $('#refreshK').onclick = () => loadKnowledge(true);
+$('#toAuto').onclick = () => {
+  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '';
+  if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
+  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '#Intent;scheme=nexusauto;package=space.nomadinfo.nexusauto;end';
+};
 $('#saveSet').onclick = () => {
   const oldKey = settings.gkey;
   settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});

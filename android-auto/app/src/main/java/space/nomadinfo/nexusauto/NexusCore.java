@@ -30,10 +30,11 @@ public class NexusCore {
     static final int NOTIF_ID = 7;
     static final String KEY_TEXT = "pitanje";
     static final String[] MODELS = {"gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"};
-    static final String BASE = "Ti si NEXUS, osobni AI asistent Dražena Purgara, vlasnika NOMAd Caffe Bara u Novom Marofu. "
+    static final String BASE = "Ti si NEXUS, osobni AI asistent Dražena Purgara, vlasnika NOMAd Caffe Bara u Novom Marofu. Sve o njemu i njegovom poslu piše u bloku ZNANJE. "
             + "Dražen sada vozi i razgovara s tobom glasom preko Android Auta. "
             + "Uvijek odgovaraj na hrvatskom, kratko i jasno, najviše 3 rečenice, bez nabrajanja, bez emotikona i bez markdowna, jer se odgovor čita naglas. "
             + "Ako pitanje traži svježe podatke (vrijeme, promet, vijesti, cijene, radno vrijeme), koristi Google pretragu. "
+            + "Za kalendar i mail koristi isključivo blokove GOOGLE KALENDAR i GMAIL ako su priloženi. "
             + "Ništa ne izmišljaj; ako ne znaš, reci to.";
 
     static SharedPreferences prefs(Context c) {
@@ -137,7 +138,18 @@ public class NexusCore {
         String key = prefs(c).getString("key", "");
         if (key.isEmpty()) return "Nemam Gemini ključ. Upiši ga u aplikaciji NEXUS Auto na mobitelu.";
         String extra = prefs(c).getString("extra", "");
-        String sys = extra.isEmpty() ? BASE : BASE + "\n" + extra;
+        String lastQ = "";
+        for (int i = msgs.length() - 1; i >= 0; i--) {
+            JSONObject m = msgs.optJSONObject(i);
+            if (m != null && "user".equals(m.optString("r"))) { lastQ = m.optString("t"); break; }
+        }
+        StringBuilder sb = new StringBuilder(BASE);
+        if (!extra.isEmpty()) sb.append("\n\nDODATNE UPUTE:\n").append(extra);
+        String know = GoogleData.knowledgeQuick(c);
+        if (!know.isEmpty()) sb.append("\n\n===== ZNANJE O VLASNIKU I NJEGOVOM POSLU (koristi kad je relevantno) =====").append(know).append("\n===== KRAJ ZNANJA =====");
+        sb.append(GoogleData.context(c, lastQ, 10000));
+        sb.append(GoogleData.now());
+        String sys = sb.toString();
 
         JSONArray contents = new JSONArray();
         try {
@@ -157,7 +169,7 @@ public class NexusCore {
         String last = "";
         for (String model : MODELS) {
             for (int v = 0; v < 3; v++) {
-                if (System.currentTimeMillis() - start > 30000) return "NEXUS se predugo javlja. Pokušaj ponovno.";
+                if (System.currentTimeMillis() - start > 25000) return "NEXUS se predugo javlja. Pokušaj ponovno.";
                 try {
                     JSONObject body = new JSONObject();
                     body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", sys))));
@@ -174,7 +186,7 @@ public class NexusCore {
                     HttpURLConnection con = (HttpURLConnection) new URL(
                             "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent").openConnection();
                     con.setConnectTimeout(8000);
-                    con.setReadTimeout(20000);
+                    con.setReadTimeout(15000);
                     con.setRequestMethod("POST");
                     con.setDoOutput(true);
                     con.setRequestProperty("Content-Type", "application/json");
