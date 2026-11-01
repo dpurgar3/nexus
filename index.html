@@ -494,6 +494,10 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   let list = LS.get('gmodels2', null);
   if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6)){ list = await geminiCandidates(); LS.set('gmodels2', list); LS.set('gkeytail', settings.gkey.slice(-6)); }
   if (!list.length) throw new Error('nema dostupnog Gemini modela');
+  const lat = LS.get('glat', {}); const now = Date.now();
+  const lk = gm => { const x = lat[gm]; if (!x) return 15000; if (x.bad && now - x.t > 6 * 3600 * 1000) return 15000; return x.ms; };
+  list = list.slice().sort((a, b) => lk(a) - lk(b));
+  const setLat = (gm, ms, bad) => { const L = LS.get('glat', {}); L[gm] = {ms, t: Date.now(), bad: !!bad}; LS.set('glat', L); };
   const contents = [];
   hist.forEach(m => {
     const role = m.role === 'assistant' ? 'model' : 'user';
@@ -503,15 +507,15 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
     contents.push({role, parts});
   });
   const deep = tocno || !!force;
-  const mkBody = (gm, fast) => { const gc = {temperature: deep ? 0.2 : Number(settings.temp)}; if (fast && !deep) gc.thinkingConfig = /gemini-2\./.test(gm) ? {thinkingBudget: 0} : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
+  const mkBody = (gm, fast) => { const gc = {temperature: deep ? 0.2 : Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? (deep ? {thinkingBudget: 1024} : {thinkingBudget: 0}) : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
   let lastErr;
   let n429 = 0;
   for (let i = 0; i < Math.min(list.length, 10); i++){
     const gm = list[i];
     // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
-    const ac = new AbortController(); let slow = false, got = false;
+    const ac = new AbortController(); let slow = false, got = false; const tStart = Date.now();
     const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
-    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, deep ? 60000 : 20000);
+    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, deep ? 30000 : 20000);
     const call = b => fetch(GAPI + 'models/' + gm + ':streamGenerateContent?alt=sse', {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'x-goog-api-key': settings.gkey}, body: b});
     try{
       let r = await call(mkBody(gm, LS.get('gfast', true)));
@@ -522,7 +526,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
       if (!r.ok){
         const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
         lastErr = new Error('Gemini ' + r.status + ' (' + gm + '): ' + msg.slice(0, 120));
-        if (r.status === 429) n429++;
+        if (r.status === 429){ n429++; setLat(gm, 999999, true); }
         if (r.status === 429 || r.status === 404 || r.status === 403 || r.status >= 500 || /quota|not found|free|overloaded/i.test(msg)) continue;
         throw lastErr;
       }
@@ -536,7 +540,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
           let j; try{ j = JSON.parse(l.slice(5)); }catch(e){ continue; }
           if (j.error) throw new Error('Gemini: ' + j.error.message);
           const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
-          parts.forEach(p => { if (p.text && !p.thought){ got = true; onText(p.text); } });
+          parts.forEach(p => { if (p.text && !p.thought){ if (!got) setLat(gm, Date.now() - tStart); got = true; onText(p.text); } });
           const gmeta = j.candidates && j.candidates[0] && j.candidates[0].groundingMetadata;
           if (gmeta && gmeta.groundingChunks && onSources) onSources(gmeta.groundingChunks.filter(x => x.web).map(x => ({title: x.web.title || x.web.uri, url: x.web.uri})));
         }
@@ -545,7 +549,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
       return gm;
     }catch(e){
       if (signal.aborted) throw e;
-      if (slow){ lastErr = new Error(gm + ' ne odgovara (20 s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
+      if (slow){ setLat(gm, 999999, true); lastErr = new Error(gm + ' ne odgovara (' + (deep ? 30 : 20) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
       throw e;
     }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
   }
@@ -621,6 +625,8 @@ async function callIntent(c, text){
 }
 /* ---------- karta i rute ---------- */
 const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen)/i;
+const PLACE_RE = /(^|\s)(dvor(ac|ca|cu)|crkv|katedral|ulic[aeu]|trg\b|jezer|park\b|restoran|hotel|kafić|kafic|caffe|pizzeri|muzej|planin|plaž|plaz|toplic|kolodvor|zračn[aeu] luk|aerodrom|bolnic|ljekarn|benzinsk|\bina\b|\bpetrol\b|crodux|trgovin|konzum|lidl|kaufland|spar\b|plodine|tommy|studenac|pošt[aeu]|banka|bankomat|autoservis|vulkanizer|stadion|dvorana)/i;
+function isPlaceQuery(t){ const w = t.trim().split(/\s+/); return w.length <= 5 && t.length <= 60 && PLACE_RE.test(t) && !/[?]/.test(t) && !/^(što|sto|koji|koja|koliko|kada|kad|zašto|zasto|napiši|napisi|prevedi|objava|ponuda)\b/i.test(t.trim()); }
 function mapMode(t){
   if (/(pješ|pjes|šetnj|setnj|hodaj|hodat|pješke|pjeske|na nogama)/i.test(t)) return 'walking';
   if (/(bicikl)/i.test(t)) return 'bicycling';
@@ -668,8 +674,9 @@ async function reverseAddr(pos){
   }catch(e){ return ''; }
 }
 async function mapIntent(c, text){
-  if (!MAP_RE.test(text)) return false;
-  const dest = mapDest(text), mode = mapMode(text);
+  const place = !MAP_RE.test(text) && isPlaceQuery(text);
+  if (!MAP_RE.test(text) && !place) return false;
+  const dest = place ? text.trim().replace(/[.!]+$/, '') : mapDest(text), mode = mapMode(text);
   const ai = {role:'assistant', content: '🗺️ Tražim tvoju lokaciju…'};
   c.messages.push(ai); save(); renderAll();
   const pos = await getPos();
@@ -715,7 +722,7 @@ async function send(){
   c.messages.push(m); c.updated = Date.now();
   $('#inp').value = ''; autosize(); pending = []; renderPending();
   if (!files.length && !imgs.length && CALL_RE.test(text)){ if (await callIntent(c, text)) return; }
-  if (!files.length && !imgs.length && MAP_RE.test(text) && text.length < 120){ if (await mapIntent(c, text)) return; }
+  if (!files.length && !imgs.length && (MAP_RE.test(text) || isPlaceQuery(text)) && text.length < 120){ if (await mapIntent(c, text)) return; }
   const tq = timeAnswer(text);
   if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
   save(); renderAll();
