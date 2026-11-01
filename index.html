@@ -127,6 +127,11 @@ button{font:inherit;cursor:pointer}
 #bottom{padding-bottom:max(12px,env(safe-area-inset-bottom))}
 .wrap{padding:0 12px}
 #inp{font-size:16px}
+.mapbox{margin-top:8px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+.mapbox iframe{width:100%;height:280px;border:0;display:block}
+.maplinks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.maplinks a{flex:1 1 45%;text-align:center;padding:11px 10px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);text-decoration:none;font-weight:600;font-size:15px}
+.maplinks a.main{background:#2563eb;border-color:#2563eb;color:#fff}
 .calls{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .callBtn{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:#16a34a;color:#fff;text-decoration:none;font-weight:600;font-size:16px;border:0;cursor:pointer}
 .callBtn small{font-weight:400;opacity:.9}
@@ -343,6 +348,7 @@ function msgEl(m, idx){
   if (m.images && m.images.length) extra += '<div class="thumbs">' + m.images.map(b => `<img src="data:image/*;base64,${b}">`).join('') + '</div>';
   if (m.imgCount && !(m.images && m.images.length)) extra += '<div class="att">🖼 ' + m.imgCount + ' slika (uklonjena radi memorije)</div>';
   if (m.files && m.files.length) extra += '<div class="att">📄 ' + m.files.map(esc).join(', ') + '</div>';
+  if (m.map){ extra += '<div class="mapbox"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="' + esc(m.map.embed) + '"></iframe></div><div class="maplinks">' + m.map.links.map((l, i) => `<a class="${i === 0 ? 'main' : ''}" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('') + '</div>'; }
   if (m.calls && m.calls.length) extra += '<div class="calls">' + m.calls.map(x => `<a class="callBtn" href="tel:${esc(x.tel)}">📞 ${esc(x.ime)} <small>${esc(x.broj)}</small></a>`).join('') + '</div>';
   if (m.pickContact) extra += '<div class="calls"><button class="callBtn alt" data-a="pick">📇 Odaberi iz imenika na mobitelu</button></div>';
   if (m.role !== 'user' && m.sources && m.sources.length) extra += '<div class="att">🌐 Izvori: ' + m.sources.map(x => `<a href="${esc(x.url)}" target="_blank" title="${esc(x.url)}">${/^file:/.test(x.url) ? '📁 ' : ''}${esc((x.title || x.url).slice(0, 50))}</a>`).join('') + '</div>';
@@ -613,6 +619,69 @@ async function callIntent(c, text){
   lastVoice = false;
   return true;
 }
+/* ---------- karta i rute ---------- */
+const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen)/i;
+function mapMode(t){
+  if (/(pješ|pjes|šetnj|setnj|hodaj|hodat|pješke|pjeske|na nogama)/i.test(t)) return 'walking';
+  if (/(bicikl)/i.test(t)) return 'bicycling';
+  if (/(javn|autobus|\bbus\b|vlak|tramvaj)/i.test(t)) return 'transit';
+  return 'driving';
+}
+function mapDest(t){
+  let x = t.replace(/[?!.]+$/, ' ').trim().replace(/\s*(na|u) (karti|mapi|google mapama|google maps)\s*$/i, '');
+  const gj = x.match(/^(pokaži( mi)?\s+)?gdje (je|se nalazi|su)\s+(.+)$/i);
+  if (gj) return gj[4].trim();
+  const m1 = x.match(/\b(do|prema|za|u|na)\s+(.+)$/i);
+  let d = '';
+  if (/\b(do|prema)\s+/i.test(x)) d = x.replace(/^.*?\b(do|prema)\s+/i, '');
+  else if (/(kart[aeiu]|map[aeiu]|na karti)\s+/i.test(x)) d = x.replace(/^.*?(kart[aeiu]|map[aeiu]|na karti)\s+/i, '');
+  else if (m1) d = m1[2];
+  d = d.replace(/\b(autom|automobilom|kolima|pješice|pjesice|pješke|pjeske|šetnjom|setnjom|biciklom|javnim prijevozom|autobusom|vlakom|tramvajem|molim( te)?|odavde|od ovdje|od mene|sada|sad|odmah)\b/gi, ' ')
+       .replace(/^(do|prema|za|u|na|mi|me)\s+/i, '').replace(/\s+/g, ' ').trim();
+  if (/^(gdje (sam|smo|se nalazim|se nalazimo)|moja lokacija|moju lokaciju|mene|ovdje)$/i.test(d)) d = '';
+  return d;
+}
+function getPos(){
+  return new Promise(res => {
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(p => res({lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy}), () => res(null), {enableHighAccuracy: true, timeout: 12000, maximumAge: 60000});
+  });
+}
+async function reverseAddr(pos){
+  try{
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&accept-language=hr&lat=${pos.lat}&lon=${pos.lng}`, {signal: AbortSignal.timeout(6000)});
+    const j = await r.json(); return j.display_name || '';
+  }catch(e){ return ''; }
+}
+async function mapIntent(c, text){
+  if (!MAP_RE.test(text)) return false;
+  const dest = mapDest(text), mode = mapMode(text);
+  const ai = {role:'assistant', content: '🗺️ Tražim tvoju lokaciju…'};
+  c.messages.push(ai); save(); renderAll();
+  const pos = await getPos();
+  const here = pos ? pos.lat.toFixed(6) + ',' + pos.lng.toFixed(6) : '';
+  const enc = encodeURIComponent;
+  const modeTxt = {driving: '🚗 autom', walking: '🚶 pješice', bicycling: '🚲 biciklom', transit: '🚌 javnim prijevozom'};
+  if (!dest){
+    if (!pos){ ai.content = 'Ne mogu dobiti tvoju lokaciju. Uključi **lokaciju (GPS)** na mobitelu i dopusti je NEXUS-u (Postavke preglednika → Postavke web-mjesta → Lokacija), pa pitaj ponovno.'; save(); renderAll(); return true; }
+    const addr = await reverseAddr(pos);
+    ai.content = '📍 **Ovdje si:** ' + (addr || here) + (pos.acc ? ' _(točnost oko ' + Math.round(pos.acc) + ' m)_' : '');
+    ai.map = {embed: `https://maps.google.com/maps?q=${here}&z=17&output=embed`, links: [
+      {label: '🗺️ Otvori u Google kartama', url: `https://www.google.com/maps/search/?api=1&query=${here}`},
+      {label: '📤 Pošalji lokaciju', url: `https://wa.me/?text=${enc('Ovdje sam: https://maps.google.com/?q=' + here)}`}]};
+  } else {
+    const dirUrl = m => `https://www.google.com/maps/dir/?api=1${here ? '&origin=' + here : ''}&destination=${enc(dest)}&travelmode=${m}`;
+    ai.content = '🧭 **Ruta do: ' + dest + '** — ' + modeTxt[mode] + (pos ? '' : ' _(lokaciju nisam dobio — Google karte će koristiti tvoju trenutnu)_') + '. Dodirni plavi gumb za navigaciju.';
+    ai.map = {embed: here ? `https://maps.google.com/maps?saddr=${here}&daddr=${enc(dest)}&dirflg=${{walking:'w', bicycling:'b', transit:'r', driving:'d'}[mode]}&output=embed` : `https://maps.google.com/maps?q=${enc(dest)}&output=embed`,
+      links: [{label: '▶ Pokreni navigaciju (' + modeTxt[mode] + ')', url: dirUrl(mode)}].concat(['driving', 'walking', 'transit'].filter(x => x !== mode).map(x => ({label: modeTxt[x], url: dirUrl(x)})))
+        .concat([{label: '📍 Samo mjesto', url: `https://www.google.com/maps/search/?api=1&query=${enc(dest)}`}])};
+  }
+  ai.stats = '🗺️ karta';
+  save(); renderAll();
+  if (lastVoice && settings.tts) speak(ai.content.replace(/[*_]/g, '').replace(/\(.*?\)/g, ''));
+  lastVoice = false;
+  return true;
+}
 async function send(){
   if (controller){ controller.abort(); return; }
   const text = $('#inp').value.trim();
@@ -631,6 +700,7 @@ async function send(){
   c.messages.push(m); c.updated = Date.now();
   $('#inp').value = ''; autosize(); pending = []; renderPending();
   if (!files.length && !imgs.length && CALL_RE.test(text)){ if (await callIntent(c, text)) return; }
+  if (!files.length && !imgs.length && MAP_RE.test(text) && text.length < 120){ if (await mapIntent(c, text)) return; }
   const tq = timeAnswer(text);
   if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
   save(); renderAll();
