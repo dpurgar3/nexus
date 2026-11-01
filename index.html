@@ -641,6 +641,7 @@ function mapMode(t){
   return 'driving';
 }
 function mapDest(t){
+  const tail = /\s*(na|u) (karti|mapi|google mapama|google maps)\s*[?!.]*$/i.test(t);
   let x = t.replace(/[?!.]+$/, ' ').trim().replace(/\s*(na|u) (karti|mapi|google mapama|google maps)\s*$/i, '');
   const gj = x.match(/^(pokaži( mi)?\s+)?gdje (je|se nalazi|su)\s+(.+)$/i);
   if (gj) return gj[4].trim();
@@ -651,6 +652,7 @@ function mapDest(t){
   else if (m1) d = m1[2];
   d = d.replace(/\b(autom|automobilom|kolima|pješice|pjesice|pješke|pjeske|šetnjom|setnjom|biciklom|javnim prijevozom|autobusom|vlakom|tramvajem|molim( te)?|odavde|od ovdje|od mene|sada|sad|odmah)\b/gi, ' ')
        .replace(/^(do|prema|za|u|na|mi|me)\s+/i, '').replace(/\s+/g, ' ').trim();
+  if (!d && tail) d = x.replace(/^(pokaži|pokazi|prikaži|prikazi|nađi|nadi|pronađi|pronadi)( mi)?\s+/i, '').trim();
   if (/^(gdje (sam|smo|se nalazim|se nalazimo)|moja lokacija|moju lokaciju|mene|ovdje)$/i.test(d)) d = '';
   return d;
 }
