@@ -509,11 +509,11 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   list = list.slice().sort((a, b) => lk(a) - lk(b));
   // modeli kojima je Google pretraga trenutno odbijena (dnevni limit pretrage ili nepodržano) — preskaču se dok traje web upit
   const WB = LS.get('gwebbad', {});
-  const webBad = gm => WB[gm] && now - WB[gm].t < (WB[gm].perm ? 30 * 24 * 3600 * 1000 : 6 * 3600 * 1000);
-  const markWeb = (gm, perm) => { WB[gm] = {t: Date.now(), perm: !!perm}; LS.set('gwebbad', WB); };
+  const webBad = gm => WB[gm] && now - WB[gm].t < (WB[gm].perm ? 30 * 24 * 3600 * 1000 : WB[gm].day ? 4 * 3600 * 1000 : 90 * 1000);
+  const markWeb = (gm, perm, day) => { WB[gm] = {t: Date.now(), perm: !!perm, day: !!day}; LS.set('gwebbad', WB); };
   let webDropped = false;
   const dropWeb = () => { useWeb = false; webDropped = true; sys = 'NAPOMENA SUSTAVA: Google pretraga je za ovaj odgovor nedostupna jer je potrošen besplatni dnevni limit pretrage (resetira se ujutro). Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti, vrijeme), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno. Nemoj tvrditi da „nemaš internet“.\n\n' + sys; };
-  if (useWeb){ const ok = list.filter(x => !webBad(x)); if (ok.length) list = [...ok, ...list.filter(x => webBad(x))]; else dropWeb(); }
+  if (useWeb){ const ok = list.filter(x => !webBad(x)); if (ok.length) list = [...ok, ...list.filter(x => webBad(x))]; else { Object.keys(WB).forEach(k => { if (!WB[k].perm) delete WB[k]; }); LS.set('gwebbad', WB); } }
   const setLat = (gm, ms, bad) => { const L = LS.get('glat', {}); L[gm] = {ms, t: Date.now(), bad: !!bad}; LS.set('glat', L); };
   const contents = [];
   hist.forEach(m => {
@@ -532,14 +532,15 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
     // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
     const ac = new AbortController(); let slow = false, got = false, fin = ''; const tStart = Date.now();
     const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
-    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, deep ? 30000 : 20000);
+    const tmo = useWeb ? 35000 : (deep ? 30000 : 20000);
+    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, tmo);
     const call = b => fetch(GAPI + 'models/' + gm + ':streamGenerateContent?alt=sse', {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'x-goog-api-key': settings.gkey}, body: b});
     try{
       let r = await call(mkBody(gm, LS.get('gfast', true)));
       // pretraga odbijena na ovom modelu: najprije probaj SLJEDEĆI model s pretragom; bez pretrage tek kad nijedan drugi ne može
       const webLeft = () => list.slice(i + 1, 10).some(x => !webBad(x));
       if (!r.ok && useWeb && r.status === 400){ const tw = await r.clone().text(); if (/tool|search|ground/i.test(tw)){ markWeb(gm, true); if (webLeft()){ lastErr = new Error(gm + ': pretraga nije podržana'); continue; } dropWeb(); r = await call(mkBody(gm, LS.get('gfast', true))); } }
-      if (!r.ok && r.status === 429 && useWeb){ markWeb(gm, false); if (webLeft()){ lastErr = new Error(gm + ': limit pretrage'); continue; } const rw = await call((() => { const b = JSON.parse(mkBody(gm, LS.get('gfast', true))); delete b.tools; return JSON.stringify(b); })()); if (rw.ok){ r = rw; dropWeb(); } }
+      if (!r.ok && r.status === 429 && useWeb){ const t9 = await r.clone().text(); markWeb(gm, false, /per ?day|PerDay|daily/i.test(t9)); if (webLeft()){ lastErr = new Error(gm + ': limit pretrage'); continue; } const rw = await call((() => { const b = JSON.parse(mkBody(gm, LS.get('gfast', true))); delete b.tools; return JSON.stringify(b); })()); if (rw.ok){ r = rw; dropWeb(); } }
       if (!r.ok && r.status !== 429 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
       if (!r.ok){
         const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
@@ -576,7 +577,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
       return gm + (webDropped ? ' · ⚠️ bez pretrage' : (useWeb ? ' · 🌐' : ''));
     }catch(e){
       if (signal.aborted) throw e;
-      if (slow){ setLat(gm, 999999, true); lastErr = new Error(gm + ' ne odgovara (' + (deep ? 30 : 20) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
+      if (slow){ setLat(gm, 999999, true); lastErr = new Error(gm + ' ne odgovara (' + Math.round(tmo / 1000) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
       throw e;
     }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
   }
