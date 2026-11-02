@@ -181,6 +181,7 @@ button{font:inherit;cursor:pointer}
           <button class="ib web" id="webBtn" title="Pretraga interneta">🌐</button>
           <button class="ib web" id="qBtn" title="Točno = provjerene činjenice (sporije), Brzo = brži odgovori">🎯</button>
           <button class="ib" id="micBtn" title="Govori">🎤</button>
+          <button class="ib" id="proofBtn" title="Lektura teksta (pravopis i gramatika)">✍</button>
           <button id="send">Pošalji</button>
         </div>
       </div>
@@ -362,7 +363,9 @@ function msgEl(m, idx){
   const tools = m.role === 'user' ? '' : `<div class="tools"><button data-a="copy">⧉ Kopiraj</button><button data-a="say">🔊</button>${idx !== undefined ? '<button data-a="regen">↻ Ponovi</button><button data-a="check">🔍 Provjeri</button>' : ''}${m.stats ? '<span style="font-size:11px;color:var(--muted);margin-left:auto">⚡ ' + m.stats + '</span>' : ''}</div>`;
   d.innerHTML = `<div class="av">${m.role === 'user' ? 'DP' : 'N'}</div><div class="body">${body}${extra}${tools}</div>`;
   const cp = d.querySelector('[data-a=copy]');
-  if (cp) cp.onclick = () => { navigator.clipboard.writeText(stripActs(m.content)); cp.textContent = '✓ Kopirano'; setTimeout(() => cp.textContent = '⧉ Kopiraj', 1500); };
+  const proofTxt = (m.role !== 'user' && /✍ Ispravljeno/.test(m.content || '')) ? ((m.content.match(/```[a-z]*\n?([\s\S]*?)```/) || [])[1] || '').trim() : '';
+  if (cp && proofTxt) cp.textContent = '⧉ Kopiraj ispravljeno';
+  if (cp) cp.onclick = () => { navigator.clipboard.writeText(proofTxt || stripActs(m.content)); cp.textContent = '✓ Kopirano'; setTimeout(() => cp.textContent = proofTxt ? '⧉ Kopiraj ispravljeno' : '⧉ Kopiraj', 1500); };
   const rg = d.querySelector('[data-a=regen]');
   if (rg) rg.onclick = () => regen(idx);
   const ck = d.querySelector('[data-a=check]');
@@ -514,7 +517,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
     contents.push({role, parts});
   });
   const deep = tocno || !!force;
-  const mkBody = (gm, fast) => { const gc = {temperature: deep ? 0.2 : Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? (deep ? {thinkingBudget: 1024} : {thinkingBudget: 0}) : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
+  const mkBody = (gm, fast) => { const gc = {temperature: /^\[LEKTOR\]/.test(sys) ? 0.1 : deep ? 0.2 : Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? (deep ? {thinkingBudget: 1024} : {thinkingBudget: 0}) : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
   let lastErr;
   let n429 = 0;
   for (let i = 0; i < Math.min(list.length, 10); i++){
@@ -723,13 +726,19 @@ async function send(){
   const imgs = pending.filter(p => p.type === 'image');
   const m = {role:'user', content: text || '(priloženo)'};
   if (forceNext){ m.forceQ = forceNext; forceNext = null; }
-  if (files.length){
+  if (PROOF_RE.test(text) || proofNext){
+    const body = text.replace(PROOF_RE, '').trim();
+    if (body || files.length){ m.proof = true; m.gDone = true; m.apiContent = 'Tekst za lekturu:\n\n' + body + (files.length ? '\n\n' + files.map(f => f.data).join('\n\n') : ''); }
+    proofNext = false;
+  }
+  if (files.length && !m.proof){
     m.files = files.map(f => f.name);
     m.apiContent = m.content + '\n\n' + files.map(f => `--- Datoteka: ${f.name} ---\n${f.data}\n--- kraj ---`).join('\n\n');
   }
   if (imgs.length){ m.images = imgs.map(i => i.data); m.imgMimes = imgs.map(i => i.mime); }
   c.messages.push(m); c.updated = Date.now();
   $('#inp').value = ''; autosize(); pending = []; renderPending();
+  if (m.proof){ save(); renderAll(); await runAI(c); return; }
   if (!files.length && !imgs.length && CALL_RE.test(text)){ if (await callIntent(c, text)) return; }
   if (!files.length && !imgs.length && /^(da|može|moze|ok|okej|hoću|hocu|ajde|aj|naravno|pokreni( ga| je)?|vodi me)[\s.!]*$/i.test(text)){
     const prev = c.messages.slice(0, -1), lastAi = [...prev].reverse().find(x => x.role === 'assistant');
@@ -832,10 +841,22 @@ function setReady(){
   if (!settings.gkey){ setStatus(false, 'Treba Gemini ključ — ⚙ Postavke'); return; }
   setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
 }
-let tocno = LS.get('tocno', true), forceNext = null;
+let tocno = LS.get('tocno', true), forceNext = null, proofNext = false;
 function renderQ(){ const b = $('#qBtn'); b.classList.toggle('on', tocno); b.textContent = tocno ? '🎯 Točno' : '⚡ Brzo'; }
+const PROOF_RE = /^\s*(✍|ispravi|lektoriraj|lektura|provjeri (pravopis|gramatiku)|pravopis)\b\s*(mi\s+)?(ovaj\s+|ovo\s+)?(tekst|mail|e-mail|poruku)?\s*[:\-–]?\s*/i;
+const PROOF_SYS = `[LEKTOR] Ti si iskusni lektor hrvatskoga standardnog jezika (pravila Hrvatskoga pravopisa Instituta za hrvatski jezik, razina alata ispravi.me).
+Ispravi u korisnikovu tekstu: pravopis (ije/je, č/ć, dž/đ, s/z, d/t), gramatiku (padeži, sročnost, glagolski oblici, „ne“ uz glagole, „bi“ ne „bih“ za on/ona…), interpunkciju (zarezi, točke, navodnici, razmaci prije/poslije znakova), veliko i malo slovo, tipfelere i očite pogreške u riječima. Pazi na stilske greške tipa „od strane“, „vršiti“, „na dnevnoj bazi“ — ispravi ih samo ako je ispravak prirodan.
+NE mijenjaj smisao, ton, stil, redoslijed ni formatiranje; ne dodaji i ne briši sadržaj; zadrži prijelome redaka, potpise, adrese, brojeve, imena i e-mail adrese. Ako je tekst na drugom jeziku (njemački, engleski…), ispravi ga po pravilima tog jezika.
+Odgovori TOČNO ovim oblikom i ničim drugim:
+**✍ Ispravljeno:**
+\`\`\`
+(cijeli ispravljeni tekst)
+\`\`\`
+**Promjene:**
+- pogrešno → ispravno — kratko pravilo
+Ako u tekstu nema pogrešaka, odgovori samo: **✅ Tekst je ispravan.** (bez ponavljanja teksta).`;
 function qualityText(){
-  return '\n\nTOČNOST I IZVORI:\n- Odgovaraj samo na temelju znanja koje sigurno imaš, priloženih podataka (ZNANJE, Google kalendar/mail/kontakti) ili Google pretrage.\n- Brojke, cijene, datume, imena i rezultate prepiši točno iz izvora; ne zaokružuj i ne nagađaj.\n- Ako se izvori ne slažu, reci to i navedi obje verzije.\n- Ako nisi siguran ili podatak nedostaje, jasno reci „nisam siguran“ / „nemam taj podatak“ umjesto izmišljanja.'
+  return '\n\nJEZIK: Piši gramatički i pravopisno besprijekornim hrvatskim standardom (ije/je, č/ć, dž/đ, zarezi, veliko slovo). Mailove, ponude i objave piši spremne za slanje.\n\nTOČNOST I IZVORI:\n- Odgovaraj samo na temelju znanja koje sigurno imaš, priloženih podataka (ZNANJE, Google kalendar/mail/kontakti) ili Google pretrage.\n- Brojke, cijene, datume, imena i rezultate prepiši točno iz izvora; ne zaokružuj i ne nagađaj.\n- Ako se izvori ne slažu, reci to i navedi obje verzije.\n- Ako nisi siguran ili podatak nedostaje, jasno reci „nisam siguran“ / „nemam taj podatak“ umjesto izmišljanja.'
     + (tocno ? '\n- NAČIN TOČNO: prije konačnog odgovora u sebi provjeri odgovara li odgovor točno na pitanje i je li svaka činjenica potkrijepljena izvorom. Daj kratak, precizan odgovor; na kraju jedan red „Pouzdanost: visoka / srednja / niska“ s kratkim razlogom.' : '');
 }
 function verifyLast(){
@@ -867,9 +888,9 @@ async function runAI(c){
     if (last && last.sources) ai.sources = last.sources.slice();
     const bub2 = el.querySelector('.bubble'); const t0 = Date.now(); let gotTok = false;
     const tick = setInterval(() => { if (!gotTok) bub2.innerHTML = '<i style="color:var(--muted)">NEXUS razmišlja… ' + Math.round((Date.now() - t0) / 1000) + ' s</i>'; }, 1000);
-    const sys = BASE_SYS + (settings.sys ? '\n\nDODATNE UPUTE:\n' + settings.sys : '') + knowledgeText() + actsHelp() + qualityText() + '\n\n' + nowText();
-    const hist = apiHistory(c);
-    if (hist.length){ const lm = hist[hist.length - 1]; if (lm.role === 'user') lm.content = (lm.content || '') + '\n\n[' + nowText() + ']'; }
+    const sys = (last && last.proof) ? PROOF_SYS : BASE_SYS + (settings.sys ? '\n\nDODATNE UPUTE:\n' + settings.sys : '') + knowledgeText() + actsHelp() + qualityText() + '\n\n' + nowText();
+    const hist = (last && last.proof) ? apiHistory(c).slice(-1) : apiHistory(c);
+    if (hist.length && !(last && last.proof)){ const lm = hist[hist.length - 1]; if (lm.role === 'user') lm.content = (lm.content || '') + '\n\n[' + nowText() + ']'; }
     const onText = t => {
       if (!gotTok){ gotTok = true; clearInterval(tick); }
       ai.content += t;
@@ -879,7 +900,7 @@ async function runAI(c){
     const onSources = list => { const have = new Set((ai.sources || []).map(s => s.url)); ai.sources = (ai.sources || []).concat(list.filter(s => !have.has(s.url))).slice(0, 8); };
     try{
       const forceQ = last && last.forceQ;
-      const gm = await runGemini(sys, hist, controller.signal, onText, onSources, (webPref || !!forceQ) && navigator.onLine, forceQ);
+      const gm = await runGemini(sys, hist, controller.signal, onText, onSources, !(last && last.proof) && (webPref || !!forceQ) && navigator.onLine, forceQ);
       ai.stats = '✨ ' + gm + (tocno || (last && last.forceQ) ? ' · 🎯 točno' : '') + ' · ' + Math.round((Date.now() - t0) / 1000) + ' s';
     } finally { clearInterval(tick); }
   }catch(e){
@@ -892,6 +913,19 @@ async function runAI(c){
   c.updated = Date.now(); controller = null; setSending(false); save(); renderAll();
   if (voice && settings.tts && ai.content && !/^⚠️/.test(ai.content)) speak(stripActs(ai.content));
 }
+
+/* ---------- Dijeli → NEXUS (lektura teksta iz bilo koje aplikacije) ---------- */
+window.addEventListener('load', () => {
+  const q = new URLSearchParams(location.search);
+  const t = [q.get('text'), q.get('title')].filter(Boolean).join('\n').trim() || q.get('url') || '';
+  if (!t || !(q.has('text') || q.has('title'))) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  setTimeout(() => {
+    const c = {id: Date.now().toString(36), title: '✍ ' + t.slice(0, 40), messages: [], updated: Date.now()};
+    convs.push(c); currentId = c.id; save(); renderAll();
+    $('#inp').value = t; proofNext = true; send();
+  }, 600);
+});
 
 /* ---------- povezivanje s računalom (QR / poveznica #povezi=...) ---------- */
 (function(){
@@ -922,6 +956,12 @@ $('#search').oninput = renderConvs;
 $('#menuBtn').onclick = () => $('#side').classList.toggle('open');
 $('#msgs').addEventListener('click', () => $('#side').classList.remove('open'));
 $('#webBtn').onclick = () => { webPref = !webPref; LS.set('web2', webPref); renderWeb(); };
+$('#proofBtn').onclick = () => {
+  const v = $('#inp').value.trim();
+  if (!v){ showErr('Zalijepi tekst u polje pa dodirni ✍ — ili u bilo kojoj aplikaciji označi tekst → Dijeli → NEXUS.'); return; }
+  if (!PROOF_RE.test(v)) proofNext = true;
+  send();
+};
 $('#qBtn').onclick = () => { tocno = !tocno; LS.set('tocno', tocno); renderQ(); };
 renderQ();
 $('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
