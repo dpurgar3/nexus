@@ -523,7 +523,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   for (let i = 0; i < Math.min(list.length, 10); i++){
     const gm = list[i];
     // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
-    const ac = new AbortController(); let slow = false, got = false; const tStart = Date.now();
+    const ac = new AbortController(); let slow = false, got = false, fin = ''; const tStart = Date.now();
     const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
     const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, deep ? 30000 : 20000);
     const call = b => fetch(GAPI + 'models/' + gm + ':streamGenerateContent?alt=sse', {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'x-goog-api-key': settings.gkey}, body: b});
@@ -549,11 +549,20 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
           if (!l.startsWith('data:')) continue;
           let j; try{ j = JSON.parse(l.slice(5)); }catch(e){ continue; }
           if (j.error) throw new Error('Gemini: ' + j.error.message);
+          if (j.candidates && j.candidates[0] && j.candidates[0].finishReason) fin = j.candidates[0].finishReason;
+          if (j.promptFeedback && j.promptFeedback.blockReason) fin = j.promptFeedback.blockReason;
           const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
           parts.forEach(p => { if (p.text && !p.thought){ if (!got) setLat(gm, Date.now() - tStart); got = true; onText(p.text); } });
           const gmeta = j.candidates && j.candidates[0] && j.candidates[0].groundingMetadata;
           if (gmeta && gmeta.groundingChunks && onSources) onSources(gmeta.groundingChunks.filter(x => x.web).map(x => ({title: x.web.title || x.web.uri, url: x.web.uri})));
         }
+      }
+      if (!got){
+        // prazan odgovor: model je završio bez teksta -> probaj sljedeći model umjesto prazne poruke
+        lastErr = new Error(gm + ' je vratio prazan odgovor' + (fin ? ' (' + fin + ')' : ''));
+        console.warn(lastErr.message);
+        setLat(gm, 60000, true);
+        continue;
       }
       if (i > 0){ LS.set('gmodels2', [gm, ...list.filter(x => x !== gm)]); }
       return gm;
