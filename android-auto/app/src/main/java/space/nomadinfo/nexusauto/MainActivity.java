@@ -43,10 +43,11 @@ public class MainActivity extends Activity {
     private boolean handleLink(Intent intent) {
         Uri d = intent == null ? null : intent.getData();
         if (d == null || !"nexusauto".equals(d.getScheme())) return false;
-        String g = d.getQueryParameter("g"), t = d.getQueryParameter("t");
+        String g = d.getQueryParameter("g"), t = d.getQueryParameter("t"), q = d.getQueryParameter("q");
         SharedPreferences.Editor e = NexusCore.prefs(this).edit();
         if (g != null && !g.trim().isEmpty()) e.putString("key", g.trim());
         if (t != null && !t.trim().isEmpty()) e.putString("token", t.trim());
+        if (q != null && !q.trim().isEmpty()) e.putString("qkey", q.trim());
         e.commit();
         intent.setData(null);
         Toast.makeText(this, "✅ Povezano s NEXUS-om. Učitavam znanje…", Toast.LENGTH_LONG).show();
@@ -84,6 +85,7 @@ public class MainActivity extends Activity {
         l.addView(info);
 
         final EditText key = field(l, "Gemini API ključ", p.getString("key", ""));
+        final EditText qkey = field(l, "Groq API ključ (rezerva kad Gemini potroši limit)", p.getString("qkey", ""));
         final EditText token = field(l, "NEXUS ključ (kalendar, mail, znanje)", p.getString("token", ""));
         final EditText extra = field(l, "Dodatne upute za NEXUS (nije obavezno)", p.getString("extra", ""));
         extra.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
@@ -92,6 +94,7 @@ public class MainActivity extends Activity {
         Button save = button(l, "Spremi i pošalji NEXUS u auto");
         save.setOnClickListener(v -> {
             p.edit().putString("key", key.getText().toString().trim())
+                    .putString("qkey", qkey.getText().toString().trim())
                     .putString("token", token.getText().toString().trim())
                     .putString("extra", extra.getText().toString().trim()).commit();
             NexusCore.post(this);
@@ -110,6 +113,7 @@ public class MainActivity extends Activity {
         out.setPadding(0, pad, 0, pad);
         test.setOnClickListener(v -> {
             p.edit().putString("key", key.getText().toString().trim())
+                    .putString("qkey", qkey.getText().toString().trim())
                     .putString("token", token.getText().toString().trim())
                     .putString("extra", extra.getText().toString().trim()).commit();
             final String t = q.getText().toString().trim();
@@ -139,6 +143,7 @@ public class MainActivity extends Activity {
         if (status == null) return;
         SharedPreferences p = NexusCore.prefs(this);
         String s = (p.getString("key", "").isEmpty() ? "❌ Gemini ključ nedostaje" : "✅ Gemini ključ")
+                + "\n" + (p.getString("qkey", "").isEmpty() ? "➖ Groq rezerva nije upisana" : "✅ Groq rezerva")
                 + "\n" + (p.getString("token", "").isEmpty() ? "❌ NEXUS ključ nedostaje (nema kalendara, maila ni znanja)" : "✅ NEXUS ključ (kalendar i mail)")
                 + "\n" + (p.getInt("znanjeN", 0) > 0 ? "✅ Znanje: " + p.getInt("znanjeN", 0) + " datoteka" : "❌ Znanje nije učitano");
         status.setText(s);

@@ -138,7 +138,8 @@ public class NexusCore {
 
     static String ask(Context c, JSONArray msgs) {
         String key = prefs(c).getString("key", "");
-        if (key.isEmpty()) return "Nemam Gemini ključ. Upiši ga u aplikaciji NEXUS Auto na mobitelu.";
+        String qkey = prefs(c).getString("qkey", "");
+        if (key.isEmpty() && qkey.isEmpty()) return "Nemam Gemini ključ. Upiši ga u aplikaciji NEXUS Auto na mobitelu.";
         String extra = prefs(c).getString("extra", "");
         String lastQ = "";
         for (int i = msgs.length() - 1; i >= 0; i--) {
@@ -170,9 +171,11 @@ public class NexusCore {
 
         long start = System.currentTimeMillis();
         String last = "";
-        for (String model : MODELS) {
+        boolean keyBad = false;
+        gemini:
+        for (String model : (key.isEmpty() ? new String[0] : MODELS)) {
             for (int v = 0; v < 3; v++) {
-                if (System.currentTimeMillis() - start > 25000) return "NEXUS se predugo javlja. Pokušaj ponovno.";
+                if (System.currentTimeMillis() - start > 25000) { last = "predugo čekanje"; break gemini; }
                 try {
                     JSONObject body = new JSONObject();
                     body.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", sys))));
@@ -208,7 +211,8 @@ public class NexusCore {
                     }
                     last = "greška " + code;
                     if (resp.contains("API_KEY_INVALID") || resp.contains("API key not valid")) {
-                        return "Gemini ključ ne radi. Provjeri ga u aplikaciji NEXUS Auto.";
+                        keyBad = true;
+                        break gemini;
                     }
                     if (code == 400) continue;
                     if (code == 429 && v == 0) continue;
@@ -219,7 +223,57 @@ public class NexusCore {
                 }
             }
         }
+        // Gemini ne može (dnevni limit, greška, sporo) -> rezerva Groq
+        if (!qkey.isEmpty()) {
+            String g = askGroq(qkey, sys, msgs);
+            if (g.startsWith("!")) last = g.substring(1);
+            else return clean(takeAction(c, g));
+        }
+        if (keyBad) return "Gemini ključ ne radi. Provjeri ga u aplikaciji NEXUS Auto.";
         return "Nisam dobio odgovor (" + last + "). Pokušaj ponovno.";
+    }
+
+    /** Rezerva: Groq (s pretragom interneta preko gpt-oss). Vraća tekst ili "!razlog" kad ne uspije. */
+    static String askGroq(String qkey, String sys, JSONArray msgs) {
+        String[][] plan = {{"openai/gpt-oss-120b", "web"}, {"llama-3.3-70b-versatile", ""}, {"openai/gpt-oss-20b", ""}};
+        String last = "Groq ne odgovara";
+        for (String[] pm : plan) {
+            try {
+                JSONArray m = new JSONArray().put(new JSONObject().put("role", "system").put("content", sys));
+                for (int i = 0; i < msgs.length(); i++) {
+                    JSONObject x = msgs.optJSONObject(i);
+                    if (x == null) continue;
+                    String role = "user".equals(x.optString("r")) ? "user" : "assistant";
+                    if (m.length() == 1 && role.equals("assistant")) continue;
+                    m.put(new JSONObject().put("role", role).put("content", x.optString("t")));
+                }
+                JSONObject body = new JSONObject().put("model", pm[0]).put("messages", m).put("temperature", 0.5).put("max_tokens", 1500);
+                if (pm[0].contains("gpt-oss")) body.put("reasoning_effort", "low").put("include_reasoning", false);
+                if (!pm[1].isEmpty()) body.put("tools", new JSONArray().put(new JSONObject().put("type", "browser_search")));
+                HttpURLConnection con = (HttpURLConnection) new URL("https://api.groq.com/openai/v1/chat/completions").openConnection();
+                con.setConnectTimeout(8000);
+                con.setReadTimeout(pm[1].isEmpty() ? 15000 : 25000);
+                con.setRequestMethod("POST");
+                con.setDoOutput(true);
+                con.setRequestProperty("Content-Type", "application/json");
+                con.setRequestProperty("Authorization", "Bearer " + qkey);
+                try (OutputStream os = con.getOutputStream()) {
+                    os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                int code = con.getResponseCode();
+                String resp = readAll(code < 400 ? con.getInputStream() : con.getErrorStream());
+                con.disconnect();
+                if (code == 401) return "!Groq ključ ne radi";
+                if (code != 200) { last = "Groq greška " + code; continue; }
+                JSONObject j = new JSONObject(resp);
+                String t = j.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "").trim();
+                if (!t.isEmpty()) return t;
+                last = "Groq prazan odgovor";
+            } catch (Exception e) {
+                last = "Groq ne odgovara";
+            }
+        }
+        return "!" + last;
     }
 
     static final java.util.regex.Pattern ACT = java.util.regex.Pattern.compile("```\\s*nexus-akcija\\s*([\\s\\S]*?)(```|$)");

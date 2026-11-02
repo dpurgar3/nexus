@@ -1087,9 +1087,9 @@ $('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#qk
 $('#closeSet').onclick = () => $('#modal').classList.remove('show');
 $('#refreshK').onclick = () => loadKnowledge(true);
 $('#toAuto').onclick = () => {
-  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '';
+  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '', q = $('#qkeyTxt').value.trim() || settings.qkey || '';
   if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
-  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '#Intent;scheme=nexusauto;package=space.nomadinfo.nexusauto;end';
+  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '&q=' + encodeURIComponent(q) + '#Intent;scheme=nexusauto;package=space.nomadinfo.nexusauto;end';
 };
 $('#saveSet').onclick = () => {
   const oldKey = settings.gkey;
