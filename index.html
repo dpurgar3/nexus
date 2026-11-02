@@ -196,6 +196,8 @@ button{font:inherit;cursor:pointer}
   <h2>Postavke NEXUS-a</h2>
   <label>Gemini API ključ</label>
   <input id="gkeyTxt" type="password" placeholder="zalijepi ključ" autocomplete="off">
+  <label>Groq API ključ — rezerva kad Gemini potroši limit (neobavezno)</label>
+  <input id="qkeyTxt" type="password" placeholder="gsk_..." autocomplete="off">
   <label>NEXUS ključ (za kalendar, mail, kontakte i znanje)</label>
   <input id="tokTxt" type="password" autocomplete="off">
   <label>Dodatne upute za NEXUS (neobavezno)</label>
@@ -584,6 +586,74 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   if (n429 && lastErr && /429/.test(lastErr.message)) throw new Error('Besplatni Gemini limit za danas je potrošen na svim modelima. Resetira se svaki dan u 9:00 ujutro (naše vrijeme). Do tada isključi 🌐 web ili pričekaj.');
   throw lastErr || new Error('Gemini nije dostupan');
 }
+
+/* ---------- Groq: rezerva kad Gemini potroši besplatni limit ---------- */
+const QAPI = 'https://api.groq.com/openai/v1/chat/completions';
+async function runGroq(sys, hist, signal, onText, onSources, useWeb){
+  if (!settings.qkey) throw new Error('nema Groq ključa');
+  const messages = [{role:'system', content: sys}];
+  hist.forEach(m => {
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
+    if (messages.length === 1 && role === 'assistant') return;
+    let t = m.content || ' ';
+    if (m.images && m.images.length) t += '\n[Priložena je slika — rezervni model ne vidi slike; reci to ako je slika bitna za odgovor.]';
+    messages.push({role, content: t});
+  });
+  const temp = /^\[LEKTOR\]/.test(sys) ? 0.1 : Number(settings.temp ?? 0.6);
+  const plan = useWeb
+    ? [['openai/gpt-oss-120b', true], ['openai/gpt-oss-20b', true], ['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false]]
+    : [['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false], ['openai/gpt-oss-20b', false], ['llama-3.1-8b-instant', false]];
+  let lastErr, webDropped = false;
+  const seenUrl = new Set();
+  const grab = o => { // izvori iz browser_search (polja se mogu razlikovati — tražimo sve {url,title})
+    const out = [];
+    const walk = x => { if (!x || typeof x !== 'object') return; if (Array.isArray(x)){ x.forEach(walk); return; } if (typeof x.url === 'string' && /^https?:/.test(x.url) && !seenUrl.has(x.url)){ seenUrl.add(x.url); out.push({title: x.title || x.url, url: x.url}); } Object.values(x).forEach(walk); };
+    walk(o); if (out.length && onSources) onSources(out);
+  };
+  for (const [model, web] of plan){
+    const ac = new AbortController(); let got = false, slow = false;
+    const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
+    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, web ? 45000 : 25000);
+    const body = {model, messages: web ? messages : (useWeb ? [{role:'system', content:'NAPOMENA SUSTAVA: pretraga interneta je za ovaj odgovor nedostupna. Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno.'}, ...messages] : messages), stream: true, temperature: temp};
+    if (/gpt-oss/.test(model)){ body.reasoning_effort = web ? 'medium' : 'low'; body.include_reasoning = false; }
+    if (web) body.tools = [{type: 'browser_search'}];
+    try{
+      const r = await fetch(QAPI, {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.qkey}, body: JSON.stringify(body)});
+      if (!r.ok){
+        const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
+        lastErr = new Error('Groq ' + r.status + ' (' + model + '): ' + msg.slice(0, 120));
+        if (r.status === 401) throw new Error('Groq ključ ne radi — provjeri ga u ⚙ Postavkama.');
+        continue;
+      }
+      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while (true){
+        const {done, value} = await reader.read(); if (done) break;
+        buf += dec.decode(value, {stream:true});
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const l of lines){
+          if (!l.startsWith('data:')) continue;
+          const d = l.slice(5).trim(); if (d === '[DONE]') continue;
+          let j; try{ j = JSON.parse(d); }catch(e){ continue; }
+          if (j.error) throw new Error('Groq: ' + (j.error.message || 'greška'));
+          const ch = j.choices && j.choices[0]; if (!ch) continue;
+          const dl = ch.delta || {};
+          if (web && dl.executed_tools) grab(dl.executed_tools);
+          if (dl.content){ got = true; onText(dl.content); }
+        }
+      }
+      if (!got){ lastErr = new Error(model + ' je vratio prazan odgovor'); continue; }
+      if (useWeb && !web) webDropped = true;
+      return model + ' (rezerva Groq)' + (webDropped ? ' · ⚠️ bez pretrage' : (web ? ' · 🌐' : ''));
+    }catch(e){
+      if (signal.aborted) throw e;
+      if (/ključ ne radi/.test(e.message)) throw e;
+      if (got) throw e; // tekst je već krenuo — ne miješaj dva odgovora
+      lastErr = slow ? new Error(model + ' ne odgovara') : e;
+      continue;
+    }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
+  }
+  throw lastErr || new Error('Groq nije dostupan');
+}
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
 
 /* ---------- pozivi: "nazovi Emanuelu Maurić" ---------- */
@@ -874,8 +944,8 @@ function speak(t){
 /* ---------- AI ---------- */
 function setStatus(on, t){ $('#dot').classList.toggle('on', on); $('#stxt').textContent = t; }
 function setReady(){
-  if (!settings.gkey){ setStatus(false, 'Treba Gemini ključ — ⚙ Postavke'); return; }
-  setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
+  if (!settings.gkey && !settings.qkey){ setStatus(false, 'Treba Gemini ključ — ⚙ Postavke'); return; }
+  setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (settings.qkey ? ' · rezerva ✓' : '') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
 }
 let tocno = LS.get('tocno', true), forceNext = null, proofNext = false;
 function renderQ(){ const b = $('#qBtn'); b.classList.toggle('on', tocno); b.textContent = tocno ? '🎯 Točno' : '⚡ Brzo'; }
@@ -906,7 +976,7 @@ function verifyLast(){
 function renderWeb(){ const b = $('#webBtn'); b.classList.toggle('on', webPref); b.textContent = webPref ? '🌐 UKLJ.' : '🌐 ISKLJ.'; }
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
 async function runAI(c){
-  if (!settings.gkey){ showErr('Upiši Gemini ključ u ⚙ Postavke.'); $('#setBtn').click(); return; }
+  if (!settings.gkey && !settings.qkey){ showErr('Upiši Gemini ključ u ⚙ Postavke.'); $('#setBtn').click(); return; }
   const voice = lastVoice; lastVoice = false;
   const last = c.messages[c.messages.length - 1];
   const ai = {role:'assistant', content:''};
@@ -936,7 +1006,17 @@ async function runAI(c){
     const onSources = list => { const have = new Set((ai.sources || []).map(s => s.url)); ai.sources = (ai.sources || []).concat(list.filter(s => !have.has(s.url))).slice(0, 8); };
     try{
       const forceQ = last && last.forceQ;
-      const gm = await runGemini(sys, hist, controller.signal, onText, onSources, !(last && last.proof) && (webPref || !!forceQ) && navigator.onLine, forceQ);
+      const wantWeb = !(last && last.proof) && (webPref || !!forceQ) && navigator.onLine;
+      let gm;
+      try{
+        if (!settings.gkey) throw new Error('nema Gemini ključa');
+        gm = await runGemini(sys, hist, controller.signal, onText, onSources, wantWeb, forceQ);
+      }catch(eg){
+        // Gemini ne može (limit, greška) -> automatski Groq, ako ima ključ i ništa još nije ispisano
+        if (controller.signal.aborted || !settings.qkey || ai.content) throw eg;
+        console.warn('Gemini -> Groq:', eg.message);
+        gm = await runGroq(sys, hist, controller.signal, onText, onSources, wantWeb);
+      }
       const ut = (last && last.role === 'user' && !last.proof) ? last.content : '';
       const pm = ut && PLACE_RE.test(ut) && ut.length < 120 ? ut.match(/(restoran|hotel|caffe|caffe bar|kafić|kafic|pizzeri\w*|muzej|dvor\w*|crkv\w*|toplic\w*|trgovin\w*)\s+(.+?)[\s?!.]*$/i) : null;
       if (pm){ const pd = (pm[1] + ' ' + pm[2]).trim(); ai.mapDest = pd; ai.map = {links: [{label: '📍 Prikaži na karti', url: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(pd)}, {label: '▶ Navigacija', url: navUrl(pd, 'driving')}]}; }
@@ -944,7 +1024,7 @@ async function runAI(c){
     } finally { clearInterval(tick); }
   }catch(e){
     if (e.name !== 'AbortError'){
-      const msg = /fetch|network|Failed/i.test(e.message) ? 'Nema veze s internetom ili Gemini ne odgovara. Pokušaj ponovno.' : e.message;
+      const msg = /fetch|network|Failed/i.test(e.message) ? 'Nema veze s internetom ili AI ne odgovara. Pokušaj ponovno.' : e.message;
       showErr(msg); if (!ai.content) ai.content = '⚠️ ' + msg;
     }
   }
@@ -1003,7 +1083,7 @@ $('#proofBtn').onclick = () => {
 };
 $('#qBtn').onclick = () => { tocno = !tocno; LS.set('tocno', tocno); renderQ(); };
 renderQ();
-$('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
+$('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#qkeyTxt').value = settings.qkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
 $('#closeSet').onclick = () => $('#modal').classList.remove('show');
 $('#refreshK').onclick = () => loadKnowledge(true);
 $('#toAuto').onclick = () => {
@@ -1013,7 +1093,7 @@ $('#toAuto').onclick = () => {
 };
 $('#saveSet').onclick = () => {
   const oldKey = settings.gkey;
-  settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
+  settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), qkey: $('#qkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
   if (oldKey !== settings.gkey) LS.set('gmodels2', null);
   LS.set('settings', settings); $('#modal').classList.remove('show'); setReady(); loadKnowledge(true);
 };

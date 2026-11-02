@@ -1,5 +1,5 @@
 // NEXUS AI - service worker: aplikacija se otvara i bez interneta, uvijek uzima najnoviju verziju kad ima interneta
-const C = 'nexus-v9';
+const C = 'nexus-v10';
 const FILES = ['./', 'index.html', 'manifest.json', 'ikona-192.png', 'ikona-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x)))).then(() => self.clients.claim())); });
