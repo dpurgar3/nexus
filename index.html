@@ -220,7 +220,8 @@ Kako radiš:
 - Kratko i direktno, korak po korak. Na mobitelu je — bez dugih uvoda. Bez nepotrebnih opcija i teorije; daj najbolje rješenje koje radi.
 - Pomažeš oko objava za društvene mreže, ponuda, cjenika, e-mailova, prijevoda (njemački, engleski), ideja za evente i marketing, računanja i planiranja.
 - Navigacija/karta: NIKAD ne piši lažne linkove ili gumbe u uglatim zagradama. Ako nudiš navigaciju, napiši pravi link ovako: [▶ Pokreni navigaciju](https://www.google.com/maps/dir/?api=1&destination=MJESTO&travelmode=driving&dir_action=navigate) (MJESTO = naziv s + umjesto razmaka).
-- Ako nešto ne znaš, reci — ne izmišljaj. Za aktualne stvari koristi pretragu interneta kad je imaš.
+- Blok ZNANJE sadrži samo podatke o vlasniku i njegovom poslu — NIJE jedini izvor. Za sva ostala pitanja (vijesti, cijene, sport, gradnja, ljudi, svijet) koristi svoje opće znanje i Google pretragu. Nikad ne odgovaraj „nemam to u bazi znanja“.
+- Za aktualne stvari (cijene, natječaji, pobjednici, rezultati, vijesti) uvijek pretraži internet i navedi konkretne podatke. Ako nešto zaista ne znaš ni nakon pretrage, reci — ne izmišljaj.
 
 Radni modovi (kad ih spomene):
 - CEO mod: zanemari sitnice, daj 1–2 odluke s najvećim učinkom.
@@ -512,12 +513,13 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   const lat = LS.get('glat', {}); const now = Date.now();
   const lk = gm => { const x = lat[gm]; if (!x) return 15000; if (x.bad && now - x.t > 6 * 3600 * 1000) return 15000; return x.ms; };
   list = list.slice().sort((a, b) => lk(a) - lk(b));
+  if (useWeb || tocno || force){ const isLite = x => /lite/.test(x); list = [...list.filter(x => !isLite(x)), ...list.filter(isLite)]; }
   // modeli kojima je Google pretraga trenutno odbijena (dnevni limit pretrage ili nepodržano) — preskaču se dok traje web upit
   const WB = LS.get('gwebbad', {});
   const webBad = gm => WB[gm] && now - WB[gm].t < (WB[gm].perm ? 30 * 24 * 3600 * 1000 : WB[gm].day ? 4 * 3600 * 1000 : 90 * 1000);
   const markWeb = (gm, perm, day) => { WB[gm] = {t: Date.now(), perm: !!perm, day: !!day}; LS.set('gwebbad', WB); };
   let webDropped = false;
-  const dropWeb = () => { useWeb = false; webDropped = true; sys = 'NAPOMENA SUSTAVA: Google pretraga je za ovaj odgovor nedostupna jer je potrošen besplatni dnevni limit pretrage (resetira se ujutro). Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti, vrijeme), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno. Nemoj tvrditi da „nemaš internet“.\n\n' + sys; };
+  const dropWeb = () => { if (settings.qkey){ const e = new Error('Google pretraga potrošena -> Groq pretraga'); e.toGroqWeb = true; throw e; } useWeb = false; webDropped = true; sys = 'NAPOMENA SUSTAVA: Google pretraga je za ovaj odgovor nedostupna jer je potrošen besplatni dnevni limit pretrage (resetira se ujutro). Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti, vrijeme), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno. Nemoj tvrditi da „nemaš internet“.\n\n' + sys; };
   if (useWeb){ const ok = list.filter(x => !webBad(x)); if (ok.length) list = [...ok, ...list.filter(x => webBad(x))]; else { Object.keys(WB).forEach(k => { if (!WB[k].perm) delete WB[k]; }); LS.set('gwebbad', WB); } }
   const setLat = (gm, ms, bad) => { const L = LS.get('glat', {}); L[gm] = {ms, t: Date.now(), bad: !!bad}; LS.set('glat', L); };
   const contents = [];
@@ -580,6 +582,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
         setLat(gm, 60000, true);
         continue;
       }
+      if (fin && !/^STOP$/.test(fin)) onText('\n\n_⚠️ Odgovor je prekinut (' + fin + ') — klikni ↻ Ponovi._');
       if (i > 0){ LS.set('gmodels2', [gm, ...list.filter(x => x !== gm)]); }
       return gm + (webDropped ? ' · ⚠️ bez pretrage' : (useWeb ? ' · 🌐' : ''));
     }catch(e){
