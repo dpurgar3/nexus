@@ -504,7 +504,10 @@ async function geminiCandidates(){
 async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   if (!settings.gkey) throw new Error('nema Gemini ključa');
   let list = LS.get('gmodels2', null);
-  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6)){ list = await geminiCandidates(); LS.set('gmodels2', list); LS.set('gkeytail', settings.gkey.slice(-6)); }
+  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6) || Date.now() - LS.get('gmt', 0) > 24 * 3600 * 1000){ list = await geminiCandidates(); LS.set('gmodels2', list); LS.set('gkeytail', settings.gkey.slice(-6)); LS.set('gmt', Date.now()); }
+  if (!LS.get('gfix1', false)){ LS.set('gfast', true); LS.set('glat', {}); LS.set('gfix1', true); }
+  const DEAD = LS.get('gdead', {}); list = list.filter(x => !DEAD[x]);
+  const markDead = gm => { const D = LS.get('gdead', {}); D[gm] = Date.now(); LS.set('gdead', D); LS.set('gmodels2', (LS.get('gmodels2', []) || []).filter(x => x !== gm)); };
   if (!list.length) throw new Error('nema dostupnog Gemini modela');
   const lat = LS.get('glat', {}); const now = Date.now();
   const lk = gm => { const x = lat[gm]; if (!x) return 15000; if (x.bad && now - x.t > 6 * 3600 * 1000) return 15000; return x.ms; };
@@ -527,7 +530,7 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
   });
   const deep = tocno || !!force;
   const mkBody = (gm, fast) => { const gc = {temperature: /^\[LEKTOR\]/.test(sys) ? 0.1 : deep ? 0.2 : Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? (deep ? {thinkingBudget: 1024} : {thinkingBudget: 0}) : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
-  let lastErr;
+  let lastErr; const errs = [];
   let n429 = 0;
   for (let i = 0; i < Math.min(list.length, 10); i++){
     const gm = list[i];
@@ -543,10 +546,12 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
       const webLeft = () => list.slice(i + 1, 10).some(x => !webBad(x));
       if (!r.ok && useWeb && r.status === 400){ const tw = await r.clone().text(); if (/tool|search|ground/i.test(tw)){ markWeb(gm, true); if (webLeft()){ lastErr = new Error(gm + ': pretraga nije podržana'); continue; } dropWeb(); r = await call(mkBody(gm, LS.get('gfast', true))); } }
       if (!r.ok && r.status === 429 && useWeb){ const t9 = await r.clone().text(); markWeb(gm, false, /per ?day|PerDay|daily/i.test(t9)); if (webLeft()){ lastErr = new Error(gm + ': limit pretrage'); continue; } const rw = await call((() => { const b = JSON.parse(mkBody(gm, LS.get('gfast', true))); delete b.tools; return JSON.stringify(b); })()); if (rw.ok){ r = rw; dropWeb(); } }
-      if (!r.ok && r.status !== 429 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
+      if (!r.ok && r.status === 400 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
       if (!r.ok){
         const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
         lastErr = new Error('Gemini ' + r.status + ' (' + gm + '): ' + msg.slice(0, 120));
+        errs.push(gm + ': ' + r.status);
+        if (r.status === 404 || /no longer available|not found/i.test(msg)){ markDead(gm); continue; }
         if (r.status === 429){ n429++; setLat(gm, 999999, true); }
         if (r.status === 429 || r.status === 404 || r.status === 403 || r.status >= 500 || /quota|not found|free|overloaded/i.test(msg)) continue;
         throw lastErr;
@@ -579,11 +584,12 @@ async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
       return gm + (webDropped ? ' · ⚠️ bez pretrage' : (useWeb ? ' · 🌐' : ''));
     }catch(e){
       if (signal.aborted) throw e;
-      if (slow){ setLat(gm, 999999, true); lastErr = new Error(gm + ' ne odgovara (' + Math.round(tmo / 1000) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
+      if (slow){ setLat(gm, 999999, true); errs.push(gm + ': sporo'); lastErr = new Error(gm + ' ne odgovara (' + Math.round(tmo / 1000) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
       throw e;
     }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
   }
   if (n429 && lastErr && /429/.test(lastErr.message)) throw new Error('Besplatni Gemini limit za danas je potrošen na svim modelima. Resetira se svaki dan u 9:00 ujutro (naše vrijeme). Do tada isključi 🌐 web ili pričekaj.');
+  if (errs.length > 1) throw new Error('nijedan model nije odgovorio (' + errs.join(', ') + ')');
   throw lastErr || new Error('Gemini nije dostupan');
 }
 
