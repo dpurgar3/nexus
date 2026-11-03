@@ -610,9 +610,11 @@ async function runGroq(sys, hist, signal, onText, onSources, useWeb){
   });
   const temp = /^\[LEKTOR\]/.test(sys) ? 0.1 : Number(settings.temp ?? 0.6);
   const plan = useWeb
-    ? [['openai/gpt-oss-120b', true], ['openai/gpt-oss-20b', true], ['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false]]
+    ? [['groq/compound-mini', 'c'], ['openai/gpt-oss-120b', true], ['groq/compound', 'c'], ['openai/gpt-oss-20b', true], ['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false]]
     : [['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false], ['openai/gpt-oss-20b', false], ['llama-3.1-8b-instant', false]];
-  let lastErr, webDropped = false;
+  let lastErr, webDropped = false; const webErrs = [];
+  const kt = knowledgeText(); const sysWeb = kt && sys.includes(kt) ? sys.replace(kt, '') : sys;
+  const webMsgs = [{role:'system', content: sysWeb}, ...messages.slice(1)];
   const seenUrl = new Set();
   const grab = o => { // izvori iz browser_search (polja se mogu razlikovati — tražimo sve {url,title})
     const out = [];
@@ -623,14 +625,16 @@ async function runGroq(sys, hist, signal, onText, onSources, useWeb){
     const ac = new AbortController(); let got = false, slow = false;
     const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
     const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, web ? 45000 : 25000);
-    const body = {model, messages: web ? messages : (useWeb ? [{role:'system', content:'NAPOMENA SUSTAVA: pretraga interneta je za ovaj odgovor nedostupna. Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno.'}, ...messages] : messages), stream: true, temperature: temp};
-    if (/gpt-oss/.test(model)){ body.reasoning_effort = web ? 'medium' : 'low'; body.include_reasoning = false; }
-    if (web) body.tools = [{type: 'browser_search'}];
+    const body = {model, messages: web ? webMsgs : (useWeb ? [{role:'system', content:'NAPOMENA SUSTAVA: pretraga interneta je za ovaj odgovor nedostupna. Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno.'}, ...messages] : messages), stream: true, temperature: temp};
+    if (/gpt-oss/.test(model) && web !== 'c'){ body.reasoning_effort = web ? 'medium' : 'low'; body.include_reasoning = false; }
+    if (web === true) body.tools = [{type: 'browser_search'}];
     try{
       const r = await fetch(QAPI, {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.qkey}, body: JSON.stringify(body)});
       if (!r.ok){
         const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
         lastErr = new Error('Groq ' + r.status + ' (' + model + '): ' + msg.slice(0, 120));
+        if (web) webErrs.push(model.replace(/^.*\//, '') + ' ' + r.status);
+        console.warn(lastErr.message);
         if (r.status === 401) throw new Error('Groq ključ ne radi — provjeri ga u ⚙ Postavkama.');
         continue;
       }
@@ -652,7 +656,7 @@ async function runGroq(sys, hist, signal, onText, onSources, useWeb){
       }
       if (!got){ lastErr = new Error(model + ' je vratio prazan odgovor'); continue; }
       if (useWeb && !web) webDropped = true;
-      return model + ' (rezerva Groq)' + (webDropped ? ' · ⚠️ bez pretrage' : (web ? ' · 🌐' : ''));
+      return model + ' (rezerva Groq)' + (webDropped ? ' · ⚠️ bez pretrage' + (webErrs.length ? ' (' + webErrs.join(', ') + ')' : '') : (web ? ' · 🌐' : ''));
     }catch(e){
       if (signal.aborted) throw e;
       if (/ključ ne radi/.test(e.message)) throw e;
