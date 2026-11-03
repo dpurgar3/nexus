@@ -375,7 +375,7 @@ function msgEl(m, idx){
   const pk = d.querySelector('[data-a=pick]');
   if (pk) pk.onclick = () => pickAndCall(m);
   const sy = d.querySelector('[data-a=say]');
-  if (sy) sy.onclick = () => speak(stripActs(m.content));
+  if (sy) sy.onclick = () => { if (speechSynthesis.speaking) stopTalk(); else speak(stripActs(m.content)); };
   d.querySelectorAll('.act [data-ok]').forEach(b => b.onclick = () => runAct(m, acts[+b.dataset.ok], +b.dataset.ok, d));
   d.querySelectorAll('.act [data-no]').forEach(b => b.onclick = () => { m.acts = m.acts || {}; m.acts[b.dataset.no] = '✖ Odustao si.'; save(); renderAll(); });
   return d;
@@ -943,8 +943,20 @@ function speak(t){
     const clean = (t || '').replace(/```[\s\S]*?```/g, '').replace(/[*#`>|_]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').slice(0, 1500);
     const u = new SpeechSynthesisUtterance(clean); u.lang = 'hr-HR'; u.rate = 1.05;
     const v = speechSynthesis.getVoices().find(x => /^hr/i.test(x.lang)); if (v) u.voice = v;
+    u.onend = u.onerror = () => { if (!speechSynthesis.speaking) talkBtn(false); };
+    talkBtn(true);
     speechSynthesis.speak(u);
   }catch(e){}
+}
+function stopTalk(){ try{ speechSynthesis.cancel(); }catch(e){} talkBtn(false); }
+function talkBtn(on){
+  let b = document.getElementById('stopTalk');
+  if (!b){
+    b = document.createElement('button'); b.id = 'stopTalk'; b.textContent = '⏹ Zaustavi čitanje';
+    b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:110px;z-index:9999;padding:14px 26px;border:0;border-radius:30px;background:#e5484d;color:#fff;font-size:17px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.4);display:none';
+    b.onclick = stopTalk; document.body.appendChild(b);
+  }
+  b.style.display = on ? 'block' : 'none';
 }
 
 /* ---------- AI ---------- */
