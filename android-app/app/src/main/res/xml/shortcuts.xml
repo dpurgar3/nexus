@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="glas" android:enabled="true"
+        android:icon="@drawable/ic_mic_round"
+        android:shortcutShortLabel="@string/sc_glas"
+        android:shortcutLongLabel="@string/sc_glas">
+        <intent android:action="space.nomadinfo.nexus.GLAS"
+            android:targetPackage="space.nomadinfo.nexus"
+            android:targetClass="space.nomadinfo.nexus.MainActivity" />
+    </shortcut>
+</shortcuts>

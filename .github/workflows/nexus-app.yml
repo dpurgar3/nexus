@@ -1,0 +1,36 @@
+name: NEXUS aplikacija APK
+on:
+  push:
+    branches: [main]
+    paths: ['android-app/**', '.github/workflows/nexus-app.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Kljuc za potpis
+        run: base64 -d ../android-auto/keystore.b64 > app/nexus.jks
+      - name: Izgradi APK
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp app/build/outputs/apk/release/app-release.apk NexusAI.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nexus-app
+          name: NEXUS AI (aplikacija)
+          target_commitish: ${{ github.sha }}
+          body: 'Instalacija: preuzmi NexusAI.apk na mobitel i otvori ga. Izgradnja br. ${{ github.run_number }}.'
+          files: android-app/NexusAI.apk
+          make_latest: false

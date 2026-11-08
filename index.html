@@ -9,6 +9,42 @@
 <link rel="icon" href="ikona-192.png">
 <link rel="apple-touch-icon" href="ikona-192.png">
 <title>NEXUS AI</title>
+<script>
+/* NEXUS aplikacija (APK): govor, čitanje naglas i spremanje preko telefona */
+(function(){
+  const N = window.NexusAndroid; if (!N) return;
+  window.NEXUS_APP = true;
+  let cur = null;
+  class SR {
+    constructor(){ this.lang = 'hr-HR'; this.interimResults = true; this.continuous = false; this.maxAlternatives = 1; }
+    start(){ cur = this; N.listen(this.lang || 'hr-HR'); }
+    stop(){ N.stopListen(); }
+    abort(){ N.stopListen(); }
+  }
+  window.SpeechRecognition = window.webkitSpeechRecognition = SR;
+  window.__nxSR = function(type, text, isFinal, err){
+    const r = cur; if (!r) return;
+    if (type === 'start'){ r.onstart && r.onstart(); }
+    else if (type === 'result'){
+      const res = [[{transcript: text}]]; res[0].isFinal = !!isFinal;
+      r.onresult && r.onresult({resultIndex: 0, results: res});
+    }
+    else if (type === 'error'){ r.onerror && r.onerror({error: err}); }
+    else if (type === 'end'){ cur = null; r.onend && r.onend(); }
+  };
+  let utt = null;
+  window.SpeechSynthesisUtterance = function(t){ this.text = t || ''; this.lang = 'hr-HR'; this.rate = 1; };
+  const synth = {
+    speak(u){ utt = u; N.speak(String(u.text || ''), Number(u.rate) || 1); },
+    cancel(){ N.stopSpeak(); const u = utt; utt = null; if (u && u.onend) setTimeout(() => u.onend({}), 0); },
+    get speaking(){ return N.isSpeaking(); },
+    getVoices(){ return []; },
+    pause(){}, resume(){}
+  };
+  try{ Object.defineProperty(window, 'speechSynthesis', {value: synth, configurable: true, writable: true}); }catch(e){ window.speechSynthesis = synth; }
+  window.__nxTTS = function(){ const u = utt; utt = null; if (u && u.onend) u.onend({}); };
+})();
+</script>
 <style>
 :root{
   --bg:#0d0f14; --panel:#151821; --panel2:#1c2030; --line:#262b3b;
@@ -206,6 +242,7 @@ button{font:inherit;cursor:pointer}
   <input id="tempTxt" type="number" min="0" max="1.5" step="0.1">
   <label><input type="checkbox" id="ttsChk" style="width:auto"> Automatski pročitaj odgovor naglas kad pitam glasom</label>
   <div class="acts">
+    <button id="toApp">📱 Prenesi u aplikaciju</button>
     <button id="toAuto">🚗 NEXUS Auto</button>
     <button id="refreshK">↻ Osvježi znanje</button>
     <button id="closeSet">Odustani</button>
@@ -1111,6 +1148,12 @@ renderQ();
 $('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#qkeyTxt').value = settings.qkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
 $('#closeSet').onclick = () => $('#modal').classList.remove('show');
 $('#refreshK').onclick = () => loadKnowledge(true);
+$('#toApp').onclick = () => {
+  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '', q = $('#qkeyTxt').value.trim() || settings.qkey || '';
+  if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
+  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '&q=' + encodeURIComponent(q) + '#Intent;scheme=nexusapp;package=space.nomadinfo.nexus;end';
+};
+if (window.NEXUS_APP) $('#toApp').style.display = 'none';
 $('#toAuto').onclick = () => {
   const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '', q = $('#qkeyTxt').value.trim() || settings.qkey || '';
   if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
@@ -1123,6 +1166,7 @@ $('#saveSet').onclick = () => {
   LS.set('settings', settings); $('#modal').classList.remove('show'); setReady(); loadKnowledge(true);
 };
 $('#expBtn').onclick = () => {
+  if (window.NexusAndroid){ const ok = window.NexusAndroid.saveFile('NEXUS-mobitel-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify({convs}, null, 1)); showErr(ok ? '✅ Spremljeno u mapu Preuzimanja (Download).' : 'Spremanje nije uspjelo.'); return; }
   const blob = new Blob([JSON.stringify({convs}, null, 1)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'NEXUS-mobitel-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
