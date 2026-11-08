@@ -6,6 +6,10 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Location;
+import android.location.LocationManager;
+import android.os.Build;
+import android.os.CancellationSignal;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -42,7 +46,8 @@ public class MainActivity extends Activity {
     static final String URL = "https://dpurgar3.github.io/nexus/";
     static final String ACTION_GLAS = "space.nomadinfo.nexus.GLAS";
 
-    private static final int REQ_MIC = 11, REQ_LOC = 12, REQ_FILE = 13, REQ_DICT = 14, REQ_MIC_THEN_TAP = 15;
+    private static final int REQ_MIC = 11, REQ_LOC = 12, REQ_FILE = 13, REQ_DICT = 14, REQ_MIC_THEN_TAP = 15, REQ_LOC_NATIVE = 16;
+    private final ArrayList<Integer> locWaiting = new ArrayList<>();
 
     private WebView web;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -367,6 +372,61 @@ public class MainActivity extends Activity {
         js("window.__nxTTS&&window.__nxTTS()");
     }
 
+    /* ---------------- lokacija (GPS telefona) ---------------- */
+
+    private void locEvent(int id, Location l, String err) {
+        if (l != null) js("window.__nxLoc&&window.__nxLoc(" + id + "," + l.getLatitude() + "," + l.getLongitude() + "," + (l.hasAccuracy() ? l.getAccuracy() : 500) + ",null)");
+        else js("window.__nxLoc&&window.__nxLoc(" + id + ",0,0,0," + JSONObject.quote(err) + ")");
+    }
+
+    private void getLocation(int id) {
+        if (!has(Manifest.permission.ACCESS_FINE_LOCATION) && !has(Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            locWaiting.add(id);
+            if (locWaiting.size() == 1)
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOC_NATIVE);
+            return;
+        }
+        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        if (lm == null) { locEvent(id, null, "nema"); return; }
+        if (Build.VERSION.SDK_INT >= 28 && !lm.isLocationEnabled()) {
+            toast("Uključi Lokaciju na mobitelu (povuci gornju traku → Lokacija).");
+            locEvent(id, null, "iskljuceno");
+            return;
+        }
+        Location best = null;
+        try {
+            for (String pr : lm.getProviders(true)) {
+                Location l = lm.getLastKnownLocation(pr);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+        } catch (SecurityException ignored) { }
+        if (best != null && System.currentTimeMillis() - best.getTime() < 120000) locEvent(id, best, null);
+        String prov = null;
+        if (Build.VERSION.SDK_INT >= 31 && lm.isProviderEnabled(LocationManager.FUSED_PROVIDER)) prov = LocationManager.FUSED_PROVIDER;
+        else if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER) && has(Manifest.permission.ACCESS_FINE_LOCATION)) prov = LocationManager.GPS_PROVIDER;
+        else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) prov = LocationManager.NETWORK_PROVIDER;
+        final Location fallback = best;
+        if (prov == null || Build.VERSION.SDK_INT < 30) {
+            if (fallback != null) locEvent(id, fallback, null); else locEvent(id, null, "nema");
+            return;
+        }
+        final CancellationSignal cs = new CancellationSignal();
+        final boolean[] done = {false};
+        ui.postDelayed(() -> { if (!done[0]) { done[0] = true; cs.cancel(); if (fallback != null) locEvent(id, fallback, null); else locEvent(id, null, "timeout"); } }, 15000);
+        try {
+            lm.getCurrentLocation(prov, cs, getMainExecutor(), l -> {
+                if (done[0]) return;
+                done[0] = true;
+                if (l != null) locEvent(id, l, null);
+                else if (fallback != null) locEvent(id, fallback, null);
+                else locEvent(id, null, "nema");
+            });
+        } catch (SecurityException e) {
+            done[0] = true;
+            locEvent(id, null, "dozvola");
+        }
+    }
+
     /* ---------------- most prema web stranici ---------------- */
 
     private class Bridge {
@@ -377,6 +437,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void speak(String text, double rate) { ui.post(() -> speakText(text == null ? "" : text, (float) rate)); }
         @JavascriptInterface public void stopSpeak() { ui.post(MainActivity.this::stopSpeaking); }
         @JavascriptInterface public boolean isSpeaking() { return speaking; }
+        @JavascriptInterface public void location(int id) { ui.post(() -> getLocation(id)); }
         @JavascriptInterface public boolean saveFile(String name, String content) {
             try {
                 ContentValues v = new ContentValues();
@@ -405,6 +466,15 @@ public class MainActivity extends Activity {
             else { srEvent("error", null, false, "not-allowed"); srEvent("end", null, false, null); }
         } else if (req == REQ_MIC_THEN_TAP) {
             if (ok) tapMic(); else toast("NEXUS treba dozvolu za mikrofon da bi te čuo.");
+        } else if (req == REQ_LOC_NATIVE) {
+            boolean any = false;
+            for (int x : r) if (x == PackageManager.PERMISSION_GRANTED) any = true;
+            ArrayList<Integer> w = new ArrayList<>(locWaiting);
+            locWaiting.clear();
+            for (int id : w) {
+                if (any) getLocation(id);
+                else { toast("NEXUS treba dozvolu za lokaciju."); locEvent(id, null, "dozvola"); }
+            }
         } else if (req == REQ_LOC && geoCb != null) {
             boolean any = false;
             for (int x : r) if (x == PackageManager.PERMISSION_GRANTED) any = true;

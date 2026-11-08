@@ -42,6 +42,19 @@
     pause(){}, resume(){}
   };
   try{ Object.defineProperty(window, 'speechSynthesis', {value: synth, configurable: true, writable: true}); }catch(e){ window.speechSynthesis = synth; }
+  let locId = 0; const locCb = {};
+  window.__nxLoc = function(id, lat, lng, acc, err){
+    const c = locCb[id]; if (!c) return;
+    if (err){ delete locCb[id]; if (!c.got && c.err) c.err({code: err === 'dozvola' ? 1 : 2, message: err}); return; }
+    c.got = true; c.ok({coords: {latitude: lat, longitude: lng, accuracy: acc}, timestamp: Date.now()});
+    if (c.once) delete locCb[id];
+  };
+  const geo = {
+    getCurrentPosition(ok, err){ const id = ++locId; locCb[id] = {ok, err, once: true}; N.location(id); },
+    watchPosition(ok, err){ const id = ++locId; locCb[id] = {ok, err}; N.location(id); return id; },
+    clearWatch(id){ delete locCb[id]; }
+  };
+  try{ Object.defineProperty(navigator, 'geolocation', {value: geo, configurable: true}); }catch(e){}
   window.__nxTTS = function(){ const u = utt; utt = null; if (u && u.onend) u.onend({}); };
 })();
 </script>
@@ -772,7 +785,7 @@ async function callIntent(c, text){
   return true;
 }
 /* ---------- karta i rute ---------- */
-const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen)/i;
+const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen|kilometr|kilometar|\bkm\b)/i;
 const PLACE_RE = /(^|\s)(dvor(ac|ca|cu)|crkv|katedral|ulic[aeu]|trg\b|jezer|park\b|restoran|hotel|kafić|kafic|caffe|pizzeri|muzej|planin|plaž|plaz|toplic|kolodvor|zračn[aeu] luk|aerodrom|bolnic|ljekarn|benzinsk|\bina\b|\bpetrol\b|crodux|trgovin|konzum|lidl|kaufland|spar\b|plodine|tommy|studenac|pošt[aeu]|banka|bankomat|autoservis|vulkanizer|stadion|dvorana)/i;
 // pitanje o mjestu (čime se bavi, radno vrijeme, cijene...) NIJE zahtjev za kartu -> ide Geminiju
 const INFO_RE = /(^|\s)(što|sto|šta|sta|čime|cime|čim\b|tko|ko\b|koji\b|koja\b|koje\b|koliko\b|kada\b|kad\b|zašto|zasto|kako|kakav|kakva|kakvo|kakve|ima li|imaju li|radi li|je li|da li|bavi|nudi|radno vrijeme|radi do|radi od|otvoren|zatvoren|cijen|jelovnik|meni\b|ponud|recenzij|ocjen|iskustv|preporu|telefon|broj\b|kontakt|e-?mail|web\b|stranic|vlasnik|povijest|opiši|opisi|reci|ispričaj|ispricaj|informacij|napiši|napisi|prevedi|objav)/i;
@@ -836,6 +849,44 @@ async function reverseAddr(pos){
     const j = await r.json(); return j.display_name || '';
   }catch(e){ return ''; }
 }
+/* udaljenost i vrijeme vožnje (OpenStreetMap + OSRM, besplatno) */
+function geoCands(q){
+  q = q.replace(/\s+/g, ' ').trim(); const out = [q];
+  const w = q.split(' '), last = w.pop(), pre = w.length ? w.join(' ') + ' ' : '';
+  if (/[aeiu]$/i.test(last)){
+    if (/a$/i.test(last)) out.push(pre + last.slice(0, -1));
+    if (/e$/i.test(last)) out.push(pre + last.slice(0, -1) + 'a');
+    if (/u$/i.test(last)) out.push(pre + last.slice(0, -1));
+    if (/i$/i.test(last)) out.push(pre + last.slice(0, -1) + 'a');
+  }
+  const st = x => /^[A-ZČĆŽŠĐ]/.test(x) || x.length > 3 ? x.replace(/(om|em|u|a)$/i, '').replace(/e$/i, 'a') : x;
+  const ws = q.split(' ').filter(x => !/^(u|na|kod|pored|blizu)$/i.test(x));
+  out.push(ws.map((x, i) => i < ws.length - 1 && /om$/i.test(x) ? x.replace(/om$/i, 'i') : st(x)).join(' '));
+  return [...new Set(out)];
+}
+async function geocode(q, near){
+  const vb = near ? `&viewbox=${near.lng - 1.5},${near.lat + 1},${near.lng + 1.5},${near.lat - 1}` : '';
+  for (const cq of geoCands(q)){
+    for (const cc of ['&countrycodes=hr', '']){
+      try{
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=hr${cc}${vb}&q=${encodeURIComponent(cq)}`, {signal: AbortSignal.timeout(7000)});
+        const j = await r.json();
+        if (j && j[0]) return {lat: +j[0].lat, lng: +j[0].lon, name: j[0].display_name};
+      }catch(e){}
+    }
+  }
+  return null;
+}
+async function routeKm(from, to){
+  try{
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`, {signal: AbortSignal.timeout(9000)});
+    const j = await r.json();
+    if (j.routes && j.routes[0]) return {km: j.routes[0].distance / 1000, min: j.routes[0].duration / 60};
+  }catch(e){}
+  return null;
+}
+function fmtMin(m){ m = Math.round(m); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60 ? (m % 60) + ' min' : ''); }
+function fmtKm(k){ return (k < 10 ? k.toFixed(1) : Math.round(k)).toString().replace('.', ',') + ' km'; }
 async function mapIntent(c, text){
   const place = !MAP_RE.test(text) && isPlaceQuery(text);
   if (!MAP_RE.test(text) && !place) return false;
@@ -847,7 +898,7 @@ async function mapIntent(c, text){
   const enc = encodeURIComponent;
   const modeTxt = {driving: '🚗 autom', walking: '🚶 pješice', bicycling: '🚲 biciklom', transit: '🚌 javnim prijevozom'};
   if (!dest){
-    if (!pos){ ai.content = 'Ne mogu dobiti tvoju lokaciju. Uključi **lokaciju (GPS)** na mobitelu i dopusti je NEXUS-u (Postavke preglednika → Postavke web-mjesta → Lokacija), pa pitaj ponovno.'; save(); renderAll(); return true; }
+    if (!pos){ ai.content = 'Ne mogu dobiti tvoju lokaciju. Uključi **Lokaciju** na mobitelu (povuci gornju traku → Lokacija) i dopusti je NEXUS-u, pa pitaj ponovno.'; save(); renderAll(); return true; }
     const addr = await reverseAddr(pos);
     ai.content = '📍 **Ovdje si:** ' + (addr || here) + (pos.acc ? ' _(točnost oko ' + Math.round(pos.acc) + ' m)_' : '');
     ai.map = {embed: `https://maps.google.com/maps?q=${here}&z=17&output=embed`, links: [
@@ -855,7 +906,21 @@ async function mapIntent(c, text){
       {label: '📤 Pošalji lokaciju', url: `https://wa.me/?text=${enc('Ovdje sam: https://maps.google.com/?q=' + here)}`}]};
   } else {
     const dirUrl = m => navUrl(dest, m);
-    ai.content = '🧭 **Ruta do: ' + dest + '** — ' + modeTxt[mode] + '. Dodirni plavi gumb — navigacija kreće od tvoje **trenutne GPS lokacije** i prati te dok voziš.' + (pos && pos.acc > 150 ? ' _(karta ispod je približna — GPS još nije precizan, ali navigacija će koristiti točan)_' : '');
+    let from = pos, fromTxt = 'tvoje lokacije';
+    const od = text.match(/\bod\s+(.+?)\s+(do|prema)\s+/i);
+    if (od && !/^(ovdje|mene|sebe|tu|moje|moga|mog|trenutn)/i.test(od[1].trim())){
+      ai.content = '📏 Računam udaljenost…'; renderAll();
+      const g = await geocode(od[1], pos); if (g){ from = g; fromTxt = od[1].trim(); }
+    }
+    let km = '';
+    if (from){
+      ai.content = '📏 Računam udaljenost…'; renderAll();
+      const to = await geocode(dest, from);
+      const rt = to && await routeKm(from, to);
+      if (rt) km = '📏 **' + fmtKm(rt.km) + '** od ' + fromTxt + ' · ' + (mode === 'walking' ? '🚶 oko ' + fmtMin(rt.km / 5 * 60) + ' pješice' : mode === 'bicycling' ? '🚲 oko ' + fmtMin(rt.km / 15 * 60) + ' biciklom' : '🚗 oko ' + fmtMin(rt.min) + ' vožnje') + '\n\n';
+      else km = '_(Udaljenost nisam uspio izračunati — piše ti je Google karta ispod.)_\n\n';
+    } else km = '_(Ne vidim tvoju lokaciju pa ne mogu izračunati kilometre — uključi Lokaciju na mobitelu.)_\n\n';
+    ai.content = km + '🧭 **Ruta do: ' + dest + '** — ' + modeTxt[mode] + '. Dodirni plavi gumb — navigacija kreće od tvoje **trenutne GPS lokacije** i prati te dok voziš.' + (pos && pos.acc > 150 ? ' _(karta ispod je približna — GPS još nije precizan, ali navigacija će koristiti točan)_' : '');
     ai.map = {embed: here ? `https://maps.google.com/maps?saddr=${here}&daddr=${enc(dest)}&dirflg=${{walking:'w', bicycling:'b', transit:'r', driving:'d'}[mode]}&output=embed` : `https://maps.google.com/maps?q=${enc(dest)}&output=embed`,
       links: [{label: '▶ Pokreni navigaciju (' + modeTxt[mode] + ')', url: dirUrl(mode)}].concat(['driving', 'walking', 'transit'].filter(x => x !== mode).map(x => ({label: modeTxt[x], url: dirUrl(x)})))
         .concat([{label: '📍 Samo mjesto', url: `https://www.google.com/maps/search/?api=1&query=${enc(dest)}`}])};
