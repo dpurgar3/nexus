@@ -785,7 +785,7 @@ async function callIntent(c, text){
   return true;
 }
 /* ---------- karta i rute ---------- */
-const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen|kilometr|kilometar|\bkm\b)/i;
+const MAP_RE = /(\bkart[aeiu]\b|\bmap[aeiu]\b|na karti|google maps|\bgdje (sam|smo|se nalazim|se nalazimo)\b|moja lokacija|moju lokaciju|\bmoja pozicija|\brut[aeiu]\b|navigacij|navodi me|\bvodi me\b|odvedi me|kako (da )?(dođem|dodem|doći|doci|stignem|stići|stici)|koliko (je|treba|ima) (do|od)|udaljen|kilometr|kilometar|\bkm\b|koliko (je )?daleko)/i;
 const PLACE_RE = /(^|\s)(dvor(ac|ca|cu)|crkv|katedral|ulic[aeu]|trg\b|jezer|park\b|restoran|hotel|kafić|kafic|caffe|pizzeri|muzej|planin|plaž|plaz|toplic|kolodvor|zračn[aeu] luk|aerodrom|bolnic|ljekarn|benzinsk|\bina\b|\bpetrol\b|crodux|trgovin|konzum|lidl|kaufland|spar\b|plodine|tommy|studenac|pošt[aeu]|banka|bankomat|autoservis|vulkanizer|stadion|dvorana)/i;
 // pitanje o mjestu (čime se bavi, radno vrijeme, cijene...) NIJE zahtjev za kartu -> ide Geminiju
 const INFO_RE = /(^|\s)(što|sto|šta|sta|čime|cime|čim\b|tko|ko\b|koji\b|koja\b|koje\b|koliko\b|kada\b|kad\b|zašto|zasto|kako|kakav|kakva|kakvo|kakve|ima li|imaju li|radi li|je li|da li|bavi|nudi|radno vrijeme|radi do|radi od|otvoren|zatvoren|cijen|jelovnik|meni\b|ponud|recenzij|ocjen|iskustv|preporu|telefon|broj\b|kontakt|e-?mail|web\b|stranic|vlasnik|povijest|opiši|opisi|reci|ispričaj|ispricaj|informacij|napiši|napisi|prevedi|objav)/i;
@@ -815,6 +815,7 @@ function mapDest(t){
   const m1 = x.match(/\b(do|prema|za|u|na)\s+(.+)$/i);
   let d = '';
   if (/\b(do|prema)\s+/i.test(x)) d = x.replace(/^.*?\b(do|prema)\s+/i, '');
+  else if (/\bdaleko\s+(je\s+|su\s+)?\S/i.test(x)) d = x.replace(/^.*?\bdaleko\s+(je\s+|su\s+)?/i, '').replace(/^(od\s+(ovdje|mene|odavde)\s*)/i, '');
   else if (/(kart[aeiu]|map[aeiu]|na karti)\s+/i.test(x)) d = x.replace(/^.*?(kart[aeiu]|map[aeiu]|na karti)\s+/i, '');
   else if (m1) d = m1[2];
   d = d.replace(/\b(autom|automobilom|kolima|pješice|pjesice|pješke|pjeske|šetnjom|setnjom|biciklom|javnim prijevozom|autobusom|vlakom|tramvajem|molim( te)?|odavde|od ovdje|od mene|sada|sad|odmah)\b/gi, ' ')
@@ -966,11 +967,15 @@ async function send(){
       if (dest && await mapIntent(c, 'navigacija do ' + dest)) return;
     }
   }
+  if (!files.length && !imgs.length && /^(od\s+)?(ovog mjesta|ovoga mjesta|ovdje|odavde|odavdje|od mene|moje lokacije|mjesta gdje sam|gdje sam( sada| sad)?|tu)[\s.!?]*$/i.test(text.trim())){
+    const prevU = c.messages.slice(0, -1).reverse().find(x => x.role === 'user' && MAP_RE.test(x.content || ''));
+    if (prevU){ const d = mapDest(prevU.content); if (d && await mapIntent(c, 'koliko ima kilometara do ' + d)) return; }
+  }
   if (!files.length && !imgs.length && FOLLOW_MAP_RE.test(text)){
     const lp = lastPlace(c);
     if (lp){ const nav = /vodi|navigacij|dođem|dodem|doći|doci/i.test(text); if (await mapIntent(c, (nav ? 'navigacija do ' : 'gdje se nalazi ') + lp)) return; }
   }
-  if (!files.length && !imgs.length && (MAP_RE.test(text) || isPlaceQuery(text)) && !(INFO_RE.test(text) && !/(kart[aeiu]|map[aeiu]|navigacij|vodi me|odvedi me|ruta|rutu|kako (da )?(dođem|dodem|doći|doci)|gdje (je|se nalazi)|koliko (je|treba|ima) (do|od)|udaljen)/i.test(text)) && text.length < 120){ if (await mapIntent(c, text)) return; }
+  if (!files.length && !imgs.length && (MAP_RE.test(text) || isPlaceQuery(text)) && !(INFO_RE.test(text) && !/(kart[aeiu]|map[aeiu]|navigacij|vodi me|odvedi me|ruta|rutu|kako (da )?(dođem|dodem|doći|doci)|gdje (je|se nalazi)|koliko (je|treba|ima) (do|od)|udaljen|kilometr|kilometar|\bkm\b|daleko)/i.test(text)) && text.length < 120){ if (await mapIntent(c, text)) return; }
   const tq = timeAnswer(text);
   if (tq){ c.messages.push({role:'assistant', content: tq, stats:'🕒 sat mobitela · odmah'}); save(); renderAll(); if (lastVoice && settings.tts) speak(tq); lastVoice = false; return; }
   save(); renderAll();
