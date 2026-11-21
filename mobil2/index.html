@@ -1149,10 +1149,49 @@ function prometText(j, q){
   return linije.join('\n');
 }
 
+/* NEXUS — AI tumači pitanje, aplikacija računa (bilo koja formulacija) */
+async function prometParseAI(text){
+  try{
+    if (!settings || !settings.gkey) return null;
+    const d = new Date();
+    const p2 = n => String(n).padStart(2, '0');
+    const danas = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+    const prompt = 'Danas je ' + danas + ' (Hrvatska).\n' +
+      'Pitanje korisnika: "' + text + '"\n\n' +
+      'Zadatak: pretvori pitanje u JSON. Vrati SAMO JSON, bez objanjenja:\n' +
+      '{"promet":true ili false,"od":"GGGG-MM-DD","do":"GGGG-MM-DD","konobar":"","od_sat":"","do_sat":"","po":"auto"}\n' +
+      'Pravila:\n' +
+      '- promet=true samo ako pitanje traži podatke o prometu, računima, konobarima, smjenama, artiklima ili plaćanjima. Inače false.\n' +
+      '- "prekjučer" = dva dana prije danas, "jučer" = jedan dan prije, "danas" = danas.\n' +
+      '- "prošli tjedan" = prošli ponedjeljak do nedjelje; "ovaj tjedan" = ovaj ponedjeljak do danas; "prošli mjesec" = cijeli prošli mjesec; "u studenom" = 1.-30. studenog tekuće godine.\n' +
+      '- Ako je naveden samo dan i mjesec (npr. 11.11.), uzmi tekuću godinu; ako je taj datum u budućnosti, uzmi prošlu godinu.\n' +
+      '- "od 14:30 do 18" = od_sat "14:30", do_sat "18:00"; "do 14:30" samo do_sat; "u 18 sati" = od_sat "18:00", do_sat "18:59".\n' +
+      '- konobar = ime osobe ako je navedeno (npr. "Matija", "Lorena"), inače prazno.\n' +
+      '- po = "konobar" ako pita po konobarima, "sat" po satima, "dan" po danima, "mjesec" po mjesecima, "placanje" za način plaćanja, "artikl" za artikle, inače "auto".';
+    const model = 'gemini-2.0-flash';
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(settings.gkey);
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' } }),
+      signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const cand = (j.candidates || [])[0];
+    const parts = (cand && cand.content && cand.content.parts) || [];
+    const txt = parts.map(x => x.text || '').join('');
+    if (!txt) return null;
+    const o = JSON.parse(txt);
+    if (!o) return null;
+    return o;
+  }catch(e){ return null; }
+}
+
 async function prometContext(text){
   const meta = await prometMetaLoad();
   if (!meta) return { text: '\n\n[PROMET NIJE UČITAN NA OVOM UREĐAJU]\nPodaci o prometu nisu dostupni jer na ovom mobitelu nije dohvaćena baza (nisi prijavljen ili dohvat nije prošao).\nUPUTA ZA ODGOVOR: reci korisniku točno ovo — "Otvori Postavke → Podaci o prometu (baza), upiši e-mail i lozinku, pa klikni Prijavi se i osvježi podatke." Ne izmišljaj brojke i ne upućuj ga na blagajnu.\n[KRAJ PROMETA]', q: null };
-  const q = prometQuery(text, meta);
+  let q = null;
+  try { const ai = await prometParseAI(text); if (ai && ai.promet === false) return null; if (ai && ai.promet && ai.od){ q = { od: ai.od, do: ai.do || ai.od, konobar: ai.konobar || '', odSat: ai.od_sat || '', doSat: ai.do_sat || '', po: ai.po || 'auto', usporedi: false }; } } catch(e){}
+  if (!q) q = prometQuery(text, meta);
   if (meta && meta.dnevno_od && q.od < meta.dnevno_od) q.od = meta.dnevno_od;
   if (meta && meta.dnevno_do && q.do > meta.dnevno_do) q.do = meta.dnevno_do;
   if (window.PROMET_LOCAL && window.PROMET_LOCAL.ready()){
@@ -1471,7 +1510,7 @@ async function runAI(c){
       try{ const g = await googleContext(last.content); if (g){ last.apiContent = (last.apiContent || last.content) + g.text; last.sources = (last.sources || []).concat(g.used.map(u => ({title: 'Google ' + u, url: u === 'mail' ? 'https://mail.google.com' : u === 'kalendar' ? 'https://calendar.google.com' : 'https://contacts.google.com'}))); last.docsDone = true; } }catch(e){ showErr('Google: ' + e.message); }
       last.gDone = true; bubG.innerHTML = '';
     }
-    if (last && last.role === 'user' && !last.prometDone && prometWanted(last.content)){
+    if (last && last.role === 'user' && !last.prometDone && (prometWanted(last.content) || (settings && settings.gkey))){
       const bubP = el.querySelector('.bubble');
       bubP.innerHTML = '<i style="color:var(--muted)">📊 Gledam promet…</i>';
       try{
