@@ -939,7 +939,7 @@ function prometQuery(text, meta){
 
   // 1) eksplicitni datumi dd.mm.(gggg)
   const datumi = [];
-  const reD = /(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})?/g;
+  const reD = /(\d{1,2})\.\s?(\d{1,2})(?:\.\s?(\d{4}))?(?!\d)/g;
   let m2;
   while ((m2 = reD.exec(low))){
     const d = +m2[1], mo = +m2[2];
