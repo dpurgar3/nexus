@@ -1438,8 +1438,26 @@ async function warmup(){
   try{ await fetch(settings.host + '/api/generate', {method:'POST', body: JSON.stringify({model, prompt:'', keep_alive:-1})}); }catch(e){}
 }
 async function runAI(c){
-  let model = pickModel();
-  if (!model){ showErr('Nijedan model nije dostupan. Pokreni "Pokreni NEXUS AI.bat".'); return; }
+    let model = pickModel();
+  if (!model){
+    const lm0 = c.messages[c.messages.length - 1];
+    if (lm0 && lm0.role === 'user' && !lm0.prometDone && prometWanted(lm0.content)){
+      try{
+        const p0 = await prometContext(lm0.content);
+        if (p0 && p0.j){
+          const nas0 = (p0.j.od === p0.j.do) ? ('**📊 Promet — ' + hrD(p0.j.od) + '**') : ('**📊 Promet — ' + hrD(p0.j.od) + ' – ' + hrD(p0.j.do) + '**');
+          const tijelo0 = nas0 + '\n\nUkupno: **' + eur(p0.j.ukupno) + '**' + (p0.j.racuna ? ' · ' + p0.j.racuna + ' računa' : '') +
+            ((p0.j.konobari && p0.j.konobari.length) ? '\n' + p0.j.konobari.map(function(k){ return '- ' + k.ime + ': **' + eur(k.iznos) + '**' + (k.racuna ? ' (' + k.racuna + ')' : ''); }).join('\n') : '') +
+            '\n\n_(izračun iz baze prometa — bez AI modela)_';
+          const ai0 = { role: 'assistant', content: tijelo0 };
+          c.messages.push(ai0); c.updated = Date.now(); save(); renderAll();
+          return;
+        }
+      }catch(e){}
+    }
+    showErr('Nijedan model nije dostupan — upiši Gemini ključ u Postavkama.');
+    return;
+  }
   const last = c.messages[c.messages.length - 1];
   const ai = {role:'assistant', content:''};
   c.messages.push(ai);
