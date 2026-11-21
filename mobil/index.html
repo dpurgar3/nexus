@@ -355,6 +355,17 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
 
   function query(q){
     if (!M) return null;
+    var prvi = M.d.dani[0], zadnji = M.d.dani[M.d.dani.length - 1];
+    if (q.od > zadnji || q.do < prvi){
+      // razdoblje je izvan podataka -> vrati prazno (bez podataka za taj dan)
+      return {
+        ok: 1, od: q.od, do: q.do, od_min: 0, do_min: 1439, puni_dan: 1, konobar: q.konobar || '',
+        ukupno: 0, racuna: 0, prosjek: 0, bez_racuna: 0, priblizno: 0,
+        dana_samo_placanja: 0, dana_bez_konobara: 0,
+        konobari: [], sati: [], dani: [], placanja: [], artikli: [], artikala_ukupno: 0,
+        pokriveno: { dnevno_od: prvi, dnevno_do: zadnji, racuni_od: prvi, racuni_do: zadnji }
+      };
+    }
     var i1 = dayIndex(q.od), i2 = dayIndex(q.do);
     if (i1 > i2){ var t = i1; i1 = i2; i2 = t; }
     if (i2 >= M.d.dani.length) i2 = M.d.dani.length - 1;
@@ -888,6 +899,8 @@ function prometWanted(t){
   const low = foldHr(t);
   if (PROMET_NOT.test(low) && !/(promet|prihod|utr[žz]ak|kasa|blagajn)/.test(low)) return false;
   if (PROMET_RE.test(low)) return true;
+  if (/(\d{1,2}\.\s?\d{1,2}\.\s?\d{4}|\d{1,2}\.\s?\d{1,2}\.)/.test(low) && /(koliko|bilo|iznos|ukupno|promet|racun|zarad|radio|radil|smjen|konobar|prodao|artikl|potros)/.test(low)) return true;
+  if (/(prekju[cč]er|ju[cč]er|danas|prosli tjedan|prosli mjesec|ove godine)/.test(low) && /(koliko|bilo|iznos|ukupno|promet|racun|zarad|radio|radil|smjen|konobar|prodao|artikl|potros)/.test(low)) return true;
   // ime konobara + pitanje o radu/računu
   if (prometMeta && prometMeta.konobari && /(radil|smjen|je li|bilo|promet|ra[cč]un|zarad)/.test(low)){
     for (const ime of prometMeta.konobari){
