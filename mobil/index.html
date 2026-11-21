@@ -1458,7 +1458,7 @@ async function runAI(c){
       bubP.innerHTML = '<i style="color:var(--muted)">📊 Gledam promet…</i>';
       try{
         const p = await prometContext(last.content);
-        if (p){ last.prometSys = p.text; last.apiContent = (last.apiContent || last.content) + "\n\n" + p.text; last.docsDone = true; last.webDone = true; try { window.__vb && window.__vb('v3 Â· blok ' + (p.j ? p.j.ukupno + ' EUR' : 'bez podataka')); } catch(e){} }
+        if (p){ last.prometCard = (p.j ? ('**📊 Promet — ' + (p.j.od === p.j.do ? hrD(p.j.od) : hrD(p.j.od) + ' – ' + hrD(p.j.do)) + '**\n\n' + 'Ukupno: **' + eur(p.j.ukupno) + '**' + (p.j.racuna ? ' · ' + p.j.racuna + ' računa' : '') + ((p.j.konobari && p.j.konobari.length) ? '\n' + p.j.konobari.map(k => '- ' + k.ime + ': **' + eur(k.iznos) + '**' + (k.racuna ? ' (' + k.racuna + ')' : '')).join('\n') : '')) : ''); last.prometSys = p.text; last.apiContent = (last.apiContent || last.content) + "\n\n" + p.text; last.docsDone = true; last.webDone = true; try { window.__vb && window.__vb('v3 Â· blok ' + (p.j ? p.j.ukupno + ' EUR' : 'bez podataka')); } catch(e){} }
       }catch(e){ showErr('Promet: ' + e.message); }
       last.prometDone = true; bubP.innerHTML = '';
     }
@@ -1548,7 +1548,8 @@ async function runAI(c){
       checkEngine();
     }
   }
-  ai.content = ai.content.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() || (ai.content ? ai.content : '_(prekinuto)_');
+  if (last && last.prometCard) ai.content = last.prometCard + '\n\n' + ai.content;
+    ai.content = ai.content.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() || (ai.content ? ai.content : '_(prekinuto)_');
   c.updated = Date.now(); controller = null; setSending(false); save(); renderAll();
 }
 function setSending(on){ const b = $('#send'); b.textContent = on ? 'Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
