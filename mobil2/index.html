@@ -249,6 +249,13 @@ button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-vis
     <input id="sbPass" type="password" autocomplete="current-password" placeholder="lozinka za bazu">
     <button id="sbLogin" type="button">Prijavi se i osvježi podatke</button>
   </div>
+  <label>Veličina teksta</label>
+  <div class="row" id="zoomRow" style="display:flex;gap:8px;margin:6px 0 14px;flex-wrap:wrap">
+    <button type="button" class="ib" data-zoom="1">Mali</button>
+    <button type="button" class="ib" data-zoom="1.15">Srednji</button>
+    <button type="button" class="ib" data-zoom="1.3">Veliki</button>
+    <button type="button" class="ib" data-zoom="1.5">Ogroman</button>
+  </div>
 <div class="connectBox">
     <b>Android na istom Wi-Fi-ju</b>
     <p id="androidInfo">Pokreni NEXUS na računalu da se ovdje pojavi adresa za mobitel.</p>
@@ -1283,6 +1290,16 @@ setTimeout(function(){ try { prometMetaLoad(); } catch (e) {} }, 2500);
     if (h){ var l = h.previousElementSibling; if (l && l.tagName === 'LABEL') l.style.display = 'none'; h.style.display = 'none'; }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ocisti); else ocisti();
+  /* velicina teksta na mobitelu */
+  function primijeniZoom(z){ try { document.body.style.zoom = String(z); localStorage.setItem('nexus_zoom', String(z)); } catch(e){} }
+  function ucitajZoom(){
+    var z = parseFloat(localStorage.getItem('nexus_zoom') || '');
+    if (!z || isNaN(z)) { z = (window.innerWidth >= 420) ? 1.3 : 1; }
+    primijeniZoom(z);
+    var r = document.getElementById('zoomRow');
+    if (r){ r.querySelectorAll('button[data-zoom]').forEach(function(btn){ btn.onclick = function(){ primijeniZoom(parseFloat(btn.getAttribute('data-zoom'))); }; }); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ucitajZoom); else ucitajZoom();
 
 async function docsContext(text, lite){
   try{
