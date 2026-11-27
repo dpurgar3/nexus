@@ -1089,7 +1089,7 @@ function talkBtn(on){
 /* ---------- AI ---------- */
 function setStatus(on, t){ $('#dot').classList.toggle('on', on); $('#stxt').textContent = t; }
 function setReady(){
-  if (!settings.gkey && !settings.qkey){ setStatus(false, 'Treba Gemini ključ — ⚙ Postavke'); return; }
+  if (!window.nexusSecureAI){ setStatus(false, 'Potrebna je sigurna prijava'); return; }
   setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (settings.qkey ? ' · rezerva ✓' : '') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
 }
 let tocno = LS.get('tocno', true), forceNext = null, proofNext = false;
@@ -1121,7 +1121,7 @@ function verifyLast(){
 function renderWeb(){ const b = $('#webBtn'); b.classList.toggle('on', webPref); b.textContent = webPref ? '🌐 UKLJ.' : '🌐 ISKLJ.'; }
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
 async function runAI(c){
-  if (!settings.gkey && !settings.qkey){ showErr('Upiši Gemini ključ u ⚙ Postavke.'); $('#setBtn').click(); return; }
+  if (!window.nexusSecureAI){ showErr('Potrebna je sigurna prijava.'); return; }
   const voice = lastVoice; lastVoice = false;
   const last = c.messages[c.messages.length - 1];
   const ai = {role:'assistant', content:''};
@@ -1150,18 +1150,16 @@ async function runAI(c){
     };
     const onSources = list => { const have = new Set((ai.sources || []).map(s => s.url)); ai.sources = (ai.sources || []).concat(list.filter(s => !have.has(s.url))).slice(0, 8); };
     try{
-      const forceQ = last && last.forceQ;
-      const wantWeb = !(last && last.proof) && (webPref || !!forceQ) && navigator.onLine;
-      let gm;
-      try{
-        if (!settings.gkey) throw new Error('nema Gemini ključa');
-        gm = await runGemini(sys, hist, controller.signal, onText, onSources, wantWeb, forceQ);
-      }catch(eg){
-        // Gemini ne može (limit, greška) -> automatski Groq, ako ima ključ i ništa još nije ispisano
-        if (controller.signal.aborted || !settings.qkey || ai.content) throw eg;
-        console.warn('Gemini -> Groq:', eg.message);
-        gm = await runGroq(sys, hist, controller.signal, onText, onSources, wantWeb);
-      }
+      if (!window.nexusSecureAI) throw new Error('Potrebna je sigurna prijava.');
+      if (hist.some(m=>typeof m.content!=='string')) throw new Error('Sigurni proxy zasad podržava samo tekst.');
+      const prompt = sys + '\n\n' + hist.map(m=>m.role+': '+m.content).join('\n');
+      if(prompt.length>8000) throw new Error('Razgovor je predug za sigurni proxy. Pokreni novi razgovor ili skrati upit.');
+      let gm='Gemini';
+      let answer;
+      try { answer=await window.nexusSecureAI('gemini',prompt); }
+      catch(err){if(controller.signal.aborted) throw err; gm='Groq'; answer=await window.nexusSecureAI('groq',prompt);}
+      if(controller.signal.aborted) throw new DOMException('Aborted','AbortError');
+      onText(answer || 'Prazan odgovor.');
       const ut = (last && last.role === 'user' && !last.proof) ? last.content : '';
       const pm = ut && PLACE_RE.test(ut) && ut.length < 120 ? ut.match(/(restoran|hotel|caffe|caffe bar|kafić|kafic|pizzeri\w*|muzej|dvor\w*|crkv\w*|toplic\w*|trgovin\w*)\s+(.+?)[\s?!.]*$/i) : null;
       if (pm){ const pd = (pm[1] + ' ' + pm[2]).trim(); ai.mapDest = pd; ai.map = {links: [{label: '📍 Prikaži na karti', url: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(pd)}, {label: '▶ Navigacija', url: navUrl(pd, 'driving')}]}; }
@@ -1319,9 +1317,9 @@ if ('speechSynthesis' in window) speechSynthesis.getVoices();
 
 </script>
 <script type="module">
-import {login,logout,currentUser,onAuthChange} from './src/nexus-auth.js';
+import {login,logout,currentUser,onAuthChange,askAI} from './src/nexus-auth.js';
 const el=id=>document.getElementById(id);
-function gate(user){const ok=!!user;el('app').inert=!ok;el('secureGate').hidden=ok;el('secureLogout').hidden=!ok;}
+function gate(user){const ok=!!user;window.nexusSecureAI=ok?askAI:undefined;setReady();el('app').inert=!ok;el('secureGate').hidden=ok;el('secureLogout').hidden=!ok;}
 onAuthChange((event,user)=>gate(user));
 el('secureForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{gate(await login(el('secureEmail').value,el('securePassword').value));}catch{el('secureStatus').textContent='Prijava nije uspjela.';}finally{el('securePassword').value='';b.disabled=false;}};
 el('secureLogout').onclick=async()=>{gate(null);try{await logout();}finally{location.reload();}};
