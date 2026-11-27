@@ -55,3 +55,14 @@ export async function deleteMemory(owner){
  const {error}=await client.from('nexus_preferences').delete().eq('user_id',id);
  if(error)throw new Error('Brisanje memorije nije uspjelo.');
 }
+
+import {scope,payload} from './business-management.js';
+export async function businessRecords(owner,venue,kind,action='list',values={},key={},offset=0){
+ const spec=scope(venue,kind),id=await memoryOwner(owner),table=client.from('nexus_biz_'+kind);
+ let q;
+ if(action==='list'){if(!Number.isSafeInteger(offset)||offset<0)throw Error('Neispravna stranica.');q=table.select('*').eq('owner_id',id).eq('venue',venue);for(const k of spec.keys)q=q.order(k);q=q.range(offset,offset+99);}
+ else if(action==='insert')q=table.insert({...payload(kind,values),owner_id:id,venue}).select().single();
+ else if(action==='update'||action==='delete'){q=action==='update'?table.update(payload(kind,values,true)):table.delete();q=q.eq('owner_id',id).eq('venue',venue);for(const k of spec.keys){if(typeof key[k]!=='string'||!key[k])throw Error('Nedostaje ključ.');q=q.eq(k,key[k]);}q=q.select().single();}
+ else throw Error('Nepoznata operacija.');
+ const {data,error}=await q;if(error)throw Error('Operacija nije uspjela. Provjeri podatke, povezane zapise i ovlasti.');return data;
+}
