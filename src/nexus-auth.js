@@ -31,3 +31,27 @@ export async function smartSearch(prompt){
  if(error||!data?.sources?.length) throw new Error('Pretraga nije dostupna ili je kvota iscrpljena.');
  return data;
 }
+
+async function memoryOwner(expected){
+ const u=await currentUser();
+ if(!u||u.id!==expected||u.is_anonymous||u.app_metadata?.nexus_ai_access!==true)throw new Error('Pristup memoriji nije dopušten.');
+ return u.id;
+}
+export async function loadMemory(owner){
+ const id=await memoryOwner(owner);
+ const {data,error}=await client.from('nexus_preferences').select('preferences').eq('user_id',id).maybeSingle();
+ if(error)throw new Error('Učitavanje memorije nije uspjelo.');
+ const p=data?.preferences;
+ return {notes:typeof p?.notes==='string'?p.notes.slice(0,1500):'',enabled:p?.enabled===true};
+}
+export async function saveMemory(owner,notes,enabled){
+ if(typeof notes!=='string'||notes.length>1500||typeof enabled!=='boolean')throw new Error('Neispravne preferencije.');
+ const id=await memoryOwner(owner);
+ const {error}=await client.from('nexus_preferences').upsert({user_id:id,preferences:{notes:notes.trim(),enabled}},{onConflict:'user_id'});
+ if(error)throw new Error('Spremanje memorije nije uspjelo.');
+}
+export async function deleteMemory(owner){
+ const id=await memoryOwner(owner);
+ const {error}=await client.from('nexus_preferences').delete().eq('user_id',id);
+ if(error)throw new Error('Brisanje memorije nije uspjelo.');
+}
