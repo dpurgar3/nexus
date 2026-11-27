@@ -257,9 +257,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 <div id="modal"><div class="card">
   <h2>Postavke NEXUS-a</h2>
   <label>Gemini API ključ</label>
-  <input id="gkeyTxt" type="password" placeholder="zalijepi ključ" autocomplete="off">
   <label>Groq API ključ — rezerva kad Gemini potroši limit (neobavezno)</label>
-  <input id="qkeyTxt" type="password" placeholder="gsk_..." autocomplete="off">
   <label>NEXUS ključ (za kalendar, mail, kontakte i znanje)</label>
   <input id="tokTxt" type="password" autocomplete="off">
   <label>Dodatne upute za NEXUS (neobavezno)</label>
@@ -298,11 +296,13 @@ const LS = {
   set(k, v, quiet){ try{ localStorage.setItem('nexus_'+k, JSON.stringify(v)); return true; }catch(e){ if (!quiet) showErr('Spremanje nije uspjelo (memorija preglednika puna?). Spremi razgovore gumbom "Spremi".'); return false; } }
 };
 let settings = LS.get('settings', {sys: '', temp: 0.6, tts: true});
+delete settings['gkey']; delete settings['qkey']; LS.set('settings',settings,true);
+try { for(const k of ['gkeytail','gmodels2','gmt']) localStorage.removeItem('nexus_'+k); } catch {}
 let convs = LS.get('convs', []);
 let currentId = LS.get('current', null);
 let pending = [];
 let controller = null;
-let webPref = LS.get('web2', true);
+let webPref = false;
 let knowledge = LS.get('znanje', []);
 let lastVoice = false;
 const GTOKEN_GET = () => settings.token || '';
@@ -547,188 +547,6 @@ async function googleContext(text){
   const errs = res.filter(x => x.status === 'rejected').map(x => x.reason.message);
   if (errs.length) t += '\n\n[Google greška: ' + errs.join('; ').slice(0, 200) + ']';
   return {text: t + '\nKoristi ove podatke iz Draženovog Google računa za odgovor. Ništa ne izmišljaj.', used};
-}
-const GAPI = 'https://generativelanguage.googleapis.com/v1beta/';
-async function geminiCandidates(){
-  const r = await fetch(GAPI + 'models?pageSize=200', {headers:{'x-goog-api-key': settings.gkey}, signal: AbortSignal.timeout(10000)});
-  const j = await r.json();
-  if (j.error) throw new Error('Gemini ključ ne radi (' + (j.error.status || r.status) + ')');
-  const names = (j.models || []).filter(x => (x.supportedGenerationMethods || []).includes('generateContent')).map(x => x.name.replace(/^models\//, ''));
-  const ver = n => parseFloat((n.match(/gemini-([\d.]+)/) || [0, 0])[1]);
-  const flash = names.filter(n => /^gemini-[\d.]+-flash$/.test(n)).sort((a, b) => ver(b) - ver(a));
-  const extra = ['gemini-flash-latest'].filter(n => names.includes(n));
-  const lite = names.filter(n => /^gemini-[\d.]+-flash-lite$/.test(n)).sort((a, b) => ver(b) - ver(a));
-  const extraLite = ['gemini-flash-lite-latest'].filter(n => names.includes(n));
-  // naizmjence flash i lite: kad flash potroši besplatni limit, lite (veći limit) odmah preuzima
-  const out = [], A = [...flash.slice(0, 2), ...extra], B = [...lite.slice(0, 2), ...extraLite];
-  for (let i = 0; i < Math.max(A.length, B.length); i++){ if (A[i]) out.push(A[i]); if (B[i]) out.push(B[i]); }
-  [...flash, ...lite].forEach(n => { if (!out.includes(n)) out.push(n); });
-  return out;
-}
-async function runGemini(sys, hist, signal, onText, onSources, useWeb, force){
-  if (!settings.gkey) throw new Error('nema Gemini ključa');
-  let list = LS.get('gmodels2', null);
-  if (!list || LS.get('gkeytail', '') !== settings.gkey.slice(-6) || Date.now() - LS.get('gmt', 0) > 24 * 3600 * 1000){ list = await geminiCandidates(); LS.set('gmodels2', list); LS.set('gkeytail', settings.gkey.slice(-6)); LS.set('gmt', Date.now()); }
-  if (!LS.get('gfix1', false)){ LS.set('gfast', true); LS.set('glat', {}); LS.set('gfix1', true); }
-  const DEAD = LS.get('gdead', {}); list = list.filter(x => !DEAD[x]);
-  const markDead = gm => { const D = LS.get('gdead', {}); D[gm] = Date.now(); LS.set('gdead', D); LS.set('gmodels2', (LS.get('gmodels2', []) || []).filter(x => x !== gm)); };
-  if (!list.length) throw new Error('nema dostupnog Gemini modela');
-  const lat = LS.get('glat', {}); const now = Date.now();
-  const lk = gm => { const x = lat[gm]; if (!x) return 15000; if (x.bad && now - x.t > 6 * 3600 * 1000) return 15000; return x.ms; };
-  list = list.slice().sort((a, b) => lk(a) - lk(b));
-  if (useWeb || tocno || force){ const isLite = x => /lite/.test(x); list = [...list.filter(x => !isLite(x)), ...list.filter(isLite)]; }
-  // modeli kojima je Google pretraga trenutno odbijena (dnevni limit pretrage ili nepodržano) — preskaču se dok traje web upit
-  const WB = LS.get('gwebbad', {});
-  const webBad = gm => WB[gm] && now - WB[gm].t < (WB[gm].perm ? 30 * 24 * 3600 * 1000 : WB[gm].day ? 4 * 3600 * 1000 : 90 * 1000);
-  const markWeb = (gm, perm, day) => { WB[gm] = {t: Date.now(), perm: !!perm, day: !!day}; LS.set('gwebbad', WB); };
-  let webDropped = false;
-  const dropWeb = () => { if (settings.qkey){ const e = new Error('Google pretraga potrošena -> Groq pretraga'); e.toGroqWeb = true; throw e; } useWeb = false; webDropped = true; sys = 'NAPOMENA SUSTAVA: Google pretraga je za ovaj odgovor nedostupna jer je potrošen besplatni dnevni limit pretrage (resetira se ujutro). Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti, vrijeme), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno. Nemoj tvrditi da „nemaš internet“.\n\n' + sys; };
-  if (useWeb){ const ok = list.filter(x => !webBad(x)); if (ok.length) list = [...ok, ...list.filter(x => webBad(x))]; else { Object.keys(WB).forEach(k => { if (!WB[k].perm) delete WB[k]; }); LS.set('gwebbad', WB); } }
-  const setLat = (gm, ms, bad) => { const L = LS.get('glat', {}); L[gm] = {ms, t: Date.now(), bad: !!bad}; LS.set('glat', L); };
-  const contents = [];
-  hist.forEach(m => {
-    const role = m.role === 'assistant' ? 'model' : 'user';
-    if (!contents.length && role === 'model') return;
-    const parts = [{text: m.content || ' '}];
-    (m.images || []).forEach((d, i) => parts.push({inline_data: {mime_type: (m.imgMimes && m.imgMimes[i]) || 'image/jpeg', data: d}}));
-    contents.push({role, parts});
-  });
-  const deep = tocno || !!force;
-  const mkBody = (gm, fast) => { const gc = {temperature: /^\[LEKTOR\]/.test(sys) ? 0.1 : deep ? 0.2 : Number(settings.temp)}; if (fast) gc.thinkingConfig = /gemini-2\./.test(gm) ? (deep ? {thinkingBudget: 1024} : {thinkingBudget: 0}) : {thinkingLevel: 'low'}; const body = {systemInstruction: {parts: [{text: sys}]}, contents, generationConfig: gc}; if (useWeb) body.tools = [{google_search: {}}]; return JSON.stringify(body); };
-  let lastErr; const errs = [];
-  let n429 = 0;
-  for (let i = 0; i < Math.min(list.length, 10); i++){
-    const gm = list[i];
-    // vlastiti prekid: ako model ne pošalje prvi tekst u 20 s, ide se na sljedeći
-    const ac = new AbortController(); let slow = false, got = false, fin = ''; const tStart = Date.now();
-    const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
-    const tmo = useWeb ? 35000 : (deep ? 30000 : 20000);
-    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, tmo);
-    const call = b => fetch(GAPI + 'models/' + gm + ':streamGenerateContent?alt=sse', {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'x-goog-api-key': settings.gkey}, body: b});
-    try{
-      let r = await call(mkBody(gm, LS.get('gfast', true)));
-      // pretraga odbijena na ovom modelu: najprije probaj SLJEDEĆI model s pretragom; bez pretrage tek kad nijedan drugi ne može
-      const webLeft = () => list.slice(i + 1, 10).some(x => !webBad(x));
-      if (!r.ok && useWeb && r.status === 400){ const tw = await r.clone().text(); if (/tool|search|ground/i.test(tw)){ markWeb(gm, true); if (webLeft()){ lastErr = new Error(gm + ': pretraga nije podržana'); continue; } dropWeb(); r = await call(mkBody(gm, LS.get('gfast', true))); } }
-      if (!r.ok && r.status === 429 && useWeb){ const t9 = await r.clone().text(); markWeb(gm, false, /per ?day|PerDay|daily/i.test(t9)); if (webLeft()){ lastErr = new Error(gm + ': limit pretrage'); continue; } const rw = await call((() => { const b = JSON.parse(mkBody(gm, LS.get('gfast', true))); delete b.tools; return JSON.stringify(b); })()); if (rw.ok){ r = rw; dropWeb(); } }
-      if (!r.ok && r.status === 400 && LS.get('gfast', true)){ const t0 = await r.clone().text(); console.warn('Gemini brzi način odbijen:', t0); LS.set('gfast', false); r = await call(mkBody(gm, false)); }
-      if (!r.ok){
-        const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
-        lastErr = new Error('Gemini ' + r.status + ' (' + gm + '): ' + msg.slice(0, 120));
-        errs.push(gm + ': ' + r.status);
-        if (r.status === 404 || /no longer available|not found/i.test(msg)){ markDead(gm); continue; }
-        if (r.status === 429){ n429++; setLat(gm, 999999, true); }
-        if (r.status === 429 || r.status === 404 || r.status === 403 || r.status >= 500 || /quota|not found|free|overloaded/i.test(msg)) continue;
-        throw lastErr;
-      }
-      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
-      while (true){
-        const {done, value} = await reader.read(); if (done) break;
-        buf += dec.decode(value, {stream:true});
-        const lines = buf.split('\n'); buf = lines.pop();
-        for (const l of lines){
-          if (!l.startsWith('data:')) continue;
-          let j; try{ j = JSON.parse(l.slice(5)); }catch(e){ continue; }
-          if (j.error) throw new Error('Gemini: ' + j.error.message);
-          if (j.candidates && j.candidates[0] && j.candidates[0].finishReason) fin = j.candidates[0].finishReason;
-          if (j.promptFeedback && j.promptFeedback.blockReason) fin = j.promptFeedback.blockReason;
-          const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
-          parts.forEach(p => { if (p.text && !p.thought){ if (!got) setLat(gm, Date.now() - tStart); got = true; onText(p.text); } });
-          const gmeta = j.candidates && j.candidates[0] && j.candidates[0].groundingMetadata;
-          if (gmeta && gmeta.groundingChunks && onSources) onSources(gmeta.groundingChunks.filter(x => x.web).map(x => ({title: x.web.title || x.web.uri, url: x.web.uri})));
-        }
-      }
-      if (!got){
-        // prazan odgovor: model je završio bez teksta -> probaj sljedeći model umjesto prazne poruke
-        lastErr = new Error(gm + ' je vratio prazan odgovor' + (fin ? ' (' + fin + ')' : ''));
-        console.warn(lastErr.message);
-        setLat(gm, 60000, true);
-        continue;
-      }
-      if (fin && !/^STOP$/.test(fin)) onText('\n\n_⚠️ Odgovor je prekinut (' + fin + ') — klikni ↻ Ponovi._');
-      if (i > 0){ LS.set('gmodels2', [gm, ...list.filter(x => x !== gm)]); }
-      return gm + (webDropped ? ' · ⚠️ bez pretrage' : (useWeb ? ' · 🌐' : ''));
-    }catch(e){
-      if (signal.aborted) throw e;
-      if (slow){ setLat(gm, 999999, true); errs.push(gm + ': sporo'); lastErr = new Error(gm + ' ne odgovara (' + Math.round(tmo / 1000) + ' s)'); LS.set('gmodels2', [...list.filter(x => x !== gm), gm]); continue; }
-      throw e;
-    }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
-  }
-  if (n429 && lastErr && /429/.test(lastErr.message)) throw new Error('Besplatni Gemini limit za danas je potrošen na svim modelima. Resetira se svaki dan u 9:00 ujutro (naše vrijeme). Do tada isključi 🌐 web ili pričekaj.');
-  if (errs.length > 1) throw new Error('nijedan model nije odgovorio (' + errs.join(', ') + ')');
-  throw lastErr || new Error('Gemini nije dostupan');
-}
-
-/* ---------- Groq: rezerva kad Gemini potroši besplatni limit ---------- */
-const QAPI = 'https://api.groq.com/openai/v1/chat/completions';
-async function runGroq(sys, hist, signal, onText, onSources, useWeb){
-  if (!settings.qkey) throw new Error('nema Groq ključa');
-  const messages = [{role:'system', content: sys}];
-  hist.forEach(m => {
-    const role = m.role === 'assistant' ? 'assistant' : 'user';
-    if (messages.length === 1 && role === 'assistant') return;
-    let t = m.content || ' ';
-    if (m.images && m.images.length) t += '\n[Priložena je slika — rezervni model ne vidi slike; reci to ako je slika bitna za odgovor.]';
-    messages.push({role, content: t});
-  });
-  const temp = /^\[LEKTOR\]/.test(sys) ? 0.1 : Number(settings.temp ?? 0.6);
-  const plan = useWeb
-    ? [['groq/compound-mini', 'c'], ['openai/gpt-oss-120b', true], ['groq/compound', 'c'], ['openai/gpt-oss-20b', true], ['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false]]
-    : [['openai/gpt-oss-120b', false], ['llama-3.3-70b-versatile', false], ['openai/gpt-oss-20b', false], ['llama-3.1-8b-instant', false]];
-  let lastErr, webDropped = false; const webErrs = [];
-  const kt = knowledgeText(); const sysWeb = kt && sys.includes(kt) ? sys.replace(kt, '') : sys;
-  const webMsgs = [{role:'system', content: sysWeb}, ...messages.slice(1)];
-  const seenUrl = new Set();
-  const grab = o => { // izvori iz browser_search (polja se mogu razlikovati — tražimo sve {url,title})
-    const out = [];
-    const walk = x => { if (!x || typeof x !== 'object') return; if (Array.isArray(x)){ x.forEach(walk); return; } if (typeof x.url === 'string' && /^https?:/.test(x.url) && !seenUrl.has(x.url)){ seenUrl.add(x.url); out.push({title: x.title || x.url, url: x.url}); } Object.values(x).forEach(walk); };
-    walk(o); if (out.length && onSources) onSources(out);
-  };
-  for (const [model, web] of plan){
-    const ac = new AbortController(); let got = false, slow = false;
-    const onUser = () => ac.abort(); signal.addEventListener('abort', onUser, {once:true});
-    const timer = setTimeout(() => { if (!got){ slow = true; ac.abort(); } }, web ? 45000 : 25000);
-    const body = {model, messages: web ? webMsgs : (useWeb ? [{role:'system', content:'NAPOMENA SUSTAVA: pretraga interneta je za ovaj odgovor nedostupna. Ako pitanje traži svježe podatke (rasporedi, rezultati, cijene, vijesti), u jednoj rečenici reci da pretraga trenutno nije dostupna i daj ono što pouzdano znaš uz napomenu da možda nije aktualno.'}, ...messages] : messages), stream: true, temperature: temp};
-    if (/gpt-oss/.test(model) && web !== 'c'){ body.reasoning_effort = web ? 'medium' : 'low'; body.include_reasoning = false; }
-    if (web === true) body.tools = [{type: 'browser_search'}];
-    try{
-      const r = await fetch(QAPI, {method:'POST', signal: ac.signal, headers:{'Content-Type':'application/json', 'Authorization':'Bearer ' + settings.qkey}, body: JSON.stringify(body)});
-      if (!r.ok){
-        const t = await r.text(); let msg = t; try{ msg = JSON.parse(t).error.message; }catch(e){}
-        lastErr = new Error('Groq ' + r.status + ' (' + model + '): ' + msg.slice(0, 120));
-        if (web) webErrs.push(model.replace(/^.*\//, '') + ' ' + r.status);
-        console.warn(lastErr.message);
-        if (r.status === 401) throw new Error('Groq ključ ne radi — provjeri ga u ⚙ Postavkama.');
-        continue;
-      }
-      const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
-      while (true){
-        const {done, value} = await reader.read(); if (done) break;
-        buf += dec.decode(value, {stream:true});
-        const lines = buf.split('\n'); buf = lines.pop();
-        for (const l of lines){
-          if (!l.startsWith('data:')) continue;
-          const d = l.slice(5).trim(); if (d === '[DONE]') continue;
-          let j; try{ j = JSON.parse(d); }catch(e){ continue; }
-          if (j.error) throw new Error('Groq: ' + (j.error.message || 'greška'));
-          const ch = j.choices && j.choices[0]; if (!ch) continue;
-          const dl = ch.delta || {};
-          if (web && dl.executed_tools) grab(dl.executed_tools);
-          if (dl.content){ got = true; onText(dl.content); }
-        }
-      }
-      if (!got){ lastErr = new Error(model + ' je vratio prazan odgovor'); continue; }
-      if (useWeb && !web) webDropped = true;
-      return model + ' (rezerva Groq)' + (webDropped ? ' · ⚠️ bez pretrage' + (webErrs.length ? ' (' + webErrs.join(', ') + ')' : '') : (web ? ' · 🌐' : ''));
-    }catch(e){
-      if (signal.aborted) throw e;
-      if (/ključ ne radi/.test(e.message)) throw e;
-      if (got) throw e; // tekst je već krenuo — ne miješaj dva odgovora
-      lastErr = slow ? new Error(model + ' ne odgovara') : e;
-      continue;
-    }finally{ clearTimeout(timer); signal.removeEventListener('abort', onUser); }
-  }
-  throw lastErr || new Error('Groq nije dostupan');
 }
 function setSending(on){ const b = $('#send'); b.textContent = on ? '■ Stani' : 'Pošalji'; b.classList.toggle('stop', on); }
 
@@ -1090,7 +908,7 @@ function talkBtn(on){
 function setStatus(on, t){ $('#dot').classList.toggle('on', on); $('#stxt').textContent = t; }
 function setReady(){
   if (!window.nexusSecureAI){ setStatus(false, 'Potrebna je sigurna prijava'); return; }
-  setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + (settings.qkey ? ' · rezerva ✓' : '') + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
+  setStatus(navigator.onLine, (navigator.onLine ? 'NEXUS spreman' : 'nema interneta') + ' · sigurni proxy' + (GTOKEN_GET() ? ' · Google ✓' : '') + (knowledge.length ? ' · znanje ✓' : ''));
 }
 let tocno = LS.get('tocno', true), forceNext = null, proofNext = false;
 function renderQ(){ const b = $('#qBtn'); b.classList.toggle('on', tocno); b.textContent = tocno ? '🎯 Točno' : '⚡ Brzo'; }
@@ -1195,7 +1013,6 @@ window.addEventListener('load', () => {
   if (!m) return;
   try{
     const j = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
-    if (j.g) settings.gkey = j.g;
     if (j.t) settings.token = j.t;
     LS.set('settings', settings);
     LS.set('gmodels2', null);
@@ -1217,7 +1034,7 @@ $('#newBtn').onclick = () => { currentId = null; save(); renderAll(); $('#side')
 $('#search').oninput = renderConvs;
 $('#menuBtn').onclick = () => $('#side').classList.toggle('open');
 $('#msgs').addEventListener('click', () => $('#side').classList.remove('open'));
-$('#webBtn').onclick = () => { webPref = !webPref; LS.set('web2', webPref); renderWeb(); };
+$('#webBtn').onclick = () => showErr('Internetska pretraga još nije dostupna kroz sigurni proxy.');
 $('#proofBtn').onclick = () => {
   const v = $('#inp').value.trim();
   if (!v){ showErr('Zalijepi tekst u polje pa dodirni ✍ — ili u bilo kojoj aplikaciji označi tekst → Dijeli → NEXUS.'); return; }
@@ -1226,24 +1043,14 @@ $('#proofBtn').onclick = () => {
 };
 $('#qBtn').onclick = () => { tocno = !tocno; LS.set('tocno', tocno); renderQ(); };
 renderQ();
-$('#setBtn').onclick = () => { $('#gkeyTxt').value = settings.gkey || ''; $('#qkeyTxt').value = settings.qkey || ''; $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
+$('#setBtn').onclick = () => { $('#tokTxt').value = settings.token || ''; $('#sysTxt').value = settings.sys || ''; $('#tempTxt').value = settings.temp ?? 0.6; $('#ttsChk').checked = settings.tts !== false; $('#modal').classList.add('show'); $('#side').classList.remove('open'); };
 $('#closeSet').onclick = () => $('#modal').classList.remove('show');
 $('#refreshK').onclick = () => loadKnowledge(true);
-$('#toApp').onclick = () => {
-  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '', q = $('#qkeyTxt').value.trim() || settings.qkey || '';
-  if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
-  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '&q=' + encodeURIComponent(q) + '#Intent;scheme=nexusapp;package=space.nomadinfo.nexus;end';
-};
+$('#toApp').onclick = () => { showErr('Prijenos u Android aplikaciju čeka sigurnu nadogradnju.'); };
 if (window.NEXUS_APP) $('#toApp').style.display = 'none';
-$('#toAuto').onclick = () => {
-  const g = $('#gkeyTxt').value.trim() || settings.gkey || '', t = $('#tokTxt').value.trim() || settings.token || '', q = $('#qkeyTxt').value.trim() || settings.qkey || '';
-  if (!g){ showErr('Prvo upiši Gemini ključ.'); return; }
-  location.href = 'intent://povezi?g=' + encodeURIComponent(g) + '&t=' + encodeURIComponent(t) + '&q=' + encodeURIComponent(q) + '#Intent;scheme=nexusauto;package=space.nomadinfo.nexusauto;end';
-};
+$('#toAuto').onclick = () => { showErr('NEXUS Auto čeka sigurnu nadogradnju.'); };
 $('#saveSet').onclick = () => {
-  const oldKey = settings.gkey;
-  settings = Object.assign(settings, {gkey: $('#gkeyTxt').value.trim(), qkey: $('#qkeyTxt').value.trim(), token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
-  if (oldKey !== settings.gkey) LS.set('gmodels2', null);
+  settings = Object.assign(settings, {token: $('#tokTxt').value.trim(), sys: $('#sysTxt').value.trim(), temp: $('#tempTxt').value || 0.6, tts: $('#ttsChk').checked});
   LS.set('settings', settings); $('#modal').classList.remove('show'); setReady(); loadKnowledge(true);
 };
 $('#expBtn').onclick = () => {
@@ -1259,7 +1066,6 @@ $('#impFile').onchange = e => {
   rd.onload = () => { try{
       const j = JSON.parse(rd.result); const ids = new Set(convs.map(c => c.id));
       (j.convs || []).forEach(c => { if (!ids.has(c.id)) convs.push(c); });
-      if (j.settings && j.settings.gkey && !settings.gkey){ settings.gkey = j.settings.gkey; LS.set('settings', settings); }
       save(); renderAll(); setReady(); showErr('Učitano.');
     }catch(err){ showErr('Datoteka nije ispravna.'); } };
   rd.readAsText(f); e.target.value = '';
