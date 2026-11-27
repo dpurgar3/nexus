@@ -23,3 +23,11 @@ export async function askAI(provider,prompt){
  if(error) throw new Error('AI servis nije dostupan.');
  return data.text;
 }
+
+export async function smartSearch(prompt){
+ if(typeof prompt!=='string'||!prompt.trim()||prompt.length>500) throw new Error('Unesi javni upit do 500 znakova.');
+ if(!await currentUser()) throw new Error('Potrebna je prijava.');
+ const {data,error}=await client.functions.invoke('nexus-ai',{body:{provider:'gemini',prompt,search:true}});
+ if(error||!data?.sources?.length) throw new Error('Pretraga nije dostupna ili je kvota iscrpljena.');
+ return data;
+}
