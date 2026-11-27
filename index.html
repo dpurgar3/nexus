@@ -198,6 +198,17 @@ button{font:inherit;cursor:pointer}
 #setup button{margin-top:10px;padding:10px 18px;border-radius:10px;border:0;background:var(--accent);color:#fff;font-weight:600}
 
 </style>
+<style id="windows-button-colors">
+:root{--win-green:#7FBA00;--win-red:#F25022;--win-blue:#00A4EF;--win-yellow:#FFB900}
+button{transition:filter .15s ease,box-shadow .15s ease}
+button:is(#newBtn,#expBtn,#saveSet,.ok){background:var(--win-green);color:#101010;border-color:transparent}
+button:is(#closeSet,.no,.del,.pill button){background:var(--win-red);color:#101010;border-color:transparent}
+button:is(#send,#impBtn,#toApp,#toAuto,.callBtn,[data-a="copy"],[data-a="regen"]){background:var(--win-blue);color:#101010;border-color:transparent}
+button:is(#setBtn,#refreshK,#camBtn,#attBtn,#micBtn,#proofBtn,[data-a="check"],[data-a="say"]){background:var(--win-yellow);color:#101010;border-color:transparent}
+button:not(:disabled):hover{filter:brightness(1.08)}
+button:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+button:disabled{opacity:.55;cursor:not-allowed}
+</style>
 </head>
 <body>
 <div id="app">
