@@ -211,7 +211,9 @@ button:disabled{opacity:.55;cursor:not-allowed}
 </style>
 </head>
 <body>
-<div id="app">
+<style>#secureGate{position:fixed;inset:0;z-index:2147483647;background:#16191f;color:white;display:grid;place-items:center;padding:20px}#secureGate[hidden]{display:none}#secureGate form{width:min(100%,360px);display:grid;gap:12px}#secureGate input,#secureGate button{padding:12px;border-radius:8px;font:inherit}#secureGate button{background:#7fba00;color:#101010;border:0}#secureLogout{background:#f25022;color:#101010;border:0;border-radius:8px;padding:8px}</style>
+<section id="secureGate"><form id="secureForm"><h1>NEXSUS Secure 2.1</h1><label for="secureEmail">E-mail</label><input id="secureEmail" type="email" autocomplete="username" required><label for="securePassword">Lozinka</label><input id="securePassword" type="password" autocomplete="current-password" required><button type="submit">Prijavi se</button><p id="secureStatus" role="status">Potrebna je prijava.</p></form></section>
+<div id="app" inert>
   <aside id="side">
     <div class="brand"><div class="logo">N</div><div><b>NEXUS AI</b><small>osobni asistent · mobitel</small></div></div>
     <button id="newBtn">＋ Novi razgovor</button>
@@ -227,7 +229,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
     <div id="top">
       <button id="menuBtn">☰</button>
       <div id="status"><div id="dot"></div><span id="stxt">Spajanje…</span></div>
-      <span id="clock"></span>
+      <span id="clock"></span><button id="secureLogout" hidden>Odjava</button>
     </div>
     <div id="msgs"><div class="wrap" id="list"></div></div>
     <div id="err"></div>
@@ -1316,5 +1318,13 @@ if ('speechSynthesis' in window) speechSynthesis.getVoices();
 })();
 
 </script>
-</body>
+<script type="module">
+import {login,logout,currentUser,onAuthChange} from './src/nexus-auth.js';
+const el=id=>document.getElementById(id);
+function gate(user){const ok=!!user;el('app').inert=!ok;el('secureGate').hidden=ok;el('secureLogout').hidden=!ok;}
+onAuthChange((event,user)=>gate(user));
+el('secureForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{gate(await login(el('secureEmail').value,el('securePassword').value));}catch{el('secureStatus').textContent='Prijava nije uspjela.';}finally{el('securePassword').value='';b.disabled=false;}};
+el('secureLogout').onclick=async()=>{gate(null);try{await logout();}finally{location.reload();}};
+gate(await currentUser());
+</script></body>
 </html>
