@@ -229,7 +229,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
     <div id="top">
       <button id="menuBtn">☰</button>
       <div id="status"><div id="dot"></div><span id="stxt">Spajanje…</span></div>
-      <span id="clock"></span><button id="secureLogout" hidden>Odjava</button>
+      <span id="clock"></span><button id="personalOpen" hidden style="background:#00a4ef;color:#111;border:0;border-radius:8px;padding:8px">Osobno</button><button id="secureLogout" hidden>Odjava</button>
     </div>
     <div id="msgs"><div class="wrap" id="list"></div></div>
     <div id="err"></div>
@@ -977,7 +977,7 @@ async function runAI(c){
         onSources(result.sources.filter(s=>typeof s.url==='string'&&s.url.startsWith('https://'))); onText(result.text); ai.stats='🌐 Smart Search';
       } else {
       if (hist.some(m=>typeof m.content!=='string')) throw new Error('Sigurni proxy zasad podržava samo tekst.');
-      const prompt = sys + '\n\n' + hist.map(m=>m.role+': '+m.content).join('\n');
+      const prompt = sys + (window.nexusPersonalContext?.() || '') + '\n\n' + hist.map(m=>m.role+': '+m.content).join('\n');
       if(prompt.length>8000) throw new Error('Razgovor je predug za sigurni proxy. Pokreni novi razgovor ili skrati upit.');
       let gm='Gemini';
       let answer;
@@ -1130,10 +1130,18 @@ if ('speechSynthesis' in window) speechSynthesis.getVoices();
 })();
 
 </script>
-<script type="module">
+<dialog id="personalPanel" style="max-width:min(90vw,480px);background:#20242b;color:white;border:1px solid #777;border-radius:12px;padding:20px"><h2>Personal Intelligence 3.1</h2><p>Preferencije vrijede samo tijekom ove sesije. Ako ih uključiš, šalju se AI pružatelju u običnom razgovoru, ne u Smart Search. Ne upisuj tajne.</p><textarea id="personalNotes" maxlength="1500" rows="5" style="width:100%;box-sizing:border-box" placeholder="Osobne preferencije"></textarea><p><label><input id="personalEnabled" type="checkbox"> Koristi preferencije u razgovoru</label></p><button id="personalSave">Spremi</button> <button id="personalClear">Obriši</button><hr><h3>API potrošnja</h3><p>Poslužiteljska granica: 50 zahtjeva dnevno. Stvarna potrošnja i preostala kvota nisu potvrđene.</p><p>Ova ploča ne prikazuje stanje naplate.</p><button id="personalClose">Zatvori</button></dialog><script type="module">
 import {login,logout,currentUser,onAuthChange,askAI,smartSearch} from './src/nexus-auth.js';
+import {createPersonalProfile} from './src/personal-intelligence.js';
 const el=id=>document.getElementById(id);
-function gate(user){const ok=!!user;window.nexusSecureAI=ok?askAI:undefined;window.nexusSmartSearch=ok?smartSearch:undefined;setReady();el('app').inert=!ok;el('secureGate').hidden=ok;el('secureLogout').hidden=!ok;}
+const profile=createPersonalProfile();
+let profileOwner=null;
+function clearProfile(){profile.clear();el('personalNotes').value='';el('personalEnabled').checked=false;}
+el('personalOpen').onclick=()=>{if(!profileOwner)return;const p=profile.read();el('personalNotes').value=p.notes;el('personalEnabled').checked=p.enabled;el('personalPanel').showModal();};
+el('personalSave').onclick=()=>{if(!profileOwner)return;profile.save(el('personalNotes').value,el('personalEnabled').checked);el('personalPanel').close();};
+el('personalClear').onclick=clearProfile;
+el('personalClose').onclick=()=>el('personalPanel').close();
+function gate(user){const ok=!!user;if(profileOwner!==(user?.id??null)){clearProfile();profileOwner=user?.id??null;if(el('personalPanel').open)el('personalPanel').close();}el('personalOpen').hidden=!ok;window.nexusPersonalContext=ok?()=>profile.context():undefined;window.nexusSecureAI=ok?askAI:undefined;window.nexusSmartSearch=ok?smartSearch:undefined;setReady();el('app').inert=!ok;el('secureGate').hidden=ok;el('secureLogout').hidden=!ok;}
 onAuthChange((event,user)=>gate(user));
 el('secureForm').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{gate(await login(el('secureEmail').value,el('securePassword').value));}catch{el('secureStatus').textContent='Prijava nije uspjela.';}finally{el('securePassword').value='';b.disabled=false;}};
 el('secureLogout').onclick=async()=>{gate(null);try{await logout();}finally{location.reload();}};
