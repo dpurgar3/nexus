@@ -66,3 +66,11 @@ export async function businessRecords(owner,venue,kind,action='list',values={},k
  else throw Error('Nepoznata operacija.');
  const {data,error}=await q;if(error)throw Error('Operacija nije uspjela. Provjeri podatke, povezane zapise i ovlasti.');return data;
 }
+
+export async function importItems(owner,venue,rows){
+ scope(venue,'items');const id=await memoryOwner(owner);
+ if(!Array.isArray(rows)||!rows.length||rows.length>500)throw Error('Najviše 500 artikala po uvozu.');
+ const data=rows.map(r=>({...payload('items',r),owner_id:id,venue}));
+ const {error}=await client.from('nexus_biz_items').insert(data);
+ if(error)throw Error('Uvoz odbijen. Provjeri duplikate i podatke.');
+}
