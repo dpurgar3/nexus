@@ -1,0 +1,2 @@
+# Local reader dependencies
+The browser adapter requires xlsx.mjs, pdf.mjs and pdf.worker.mjs in this directory. Obtain SheetJS CE from its official distribution and PDF.js from Mozilla's official pdfjs-dist release. Pin reviewed versions, verify upstream integrity and retain licenses. PDF.js worker and main module must be from the same release. Do not use a runtime CDN fallback. Until these files are installed, native reading is unavailable. No business documents belong in this directory.
