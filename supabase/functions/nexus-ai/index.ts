@@ -22,6 +22,11 @@ Deno.serve(async(req)=>{
  const model=Deno.env.get(gem?'GEMINI_MODEL':'GROQ_MODEL');
  if(!secret||!model) return reply(503,{error:'Provider not configured'});
  if(!/^[a-zA-Z0-9_.-]+$/.test(model)) return reply(503,{error:'Invalid configuration'});
+ const serviceKey=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+ if(!serviceKey) return reply(503,{error:'Quota unavailable'});
+ const quota=await fetch(url+'/rest/v1/rpc/nexus_consume_quota',{method:'POST',headers:{apikey:serviceKey,Authorization:'Bearer '+serviceKey,'Content-Type':'application/json'},body:JSON.stringify({p_user:user.id}),signal:AbortSignal.timeout(8000)});
+ if(!quota.ok) return reply(503,{error:'Quota unavailable'});
+ if(await quota.json()!==true) return reply(429,{error:'Daily limit reached'});
  const upstream=await fetch(gem?'https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent':'https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',...(gem?{'x-goog-api-key':secret}:{Authorization:'Bearer '+secret})},body:JSON.stringify(gem?{contents:[{parts:[{text:b.prompt}]}],generationConfig:{maxOutputTokens:512}}:{model,messages:[{role:'user',content:b.prompt}],max_tokens:512}),signal:AbortSignal.timeout(25000)});
  if(!upstream.ok) return reply(502,{error:'Provider request failed'});
  const d=await upstream.json();
