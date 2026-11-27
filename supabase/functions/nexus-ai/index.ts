@@ -1,6 +1,7 @@
-const headers = {'Content-Type':'application/json','Cache-Control':'no-store'};
+const headers = {'Content-Type':'application/json','Cache-Control':'no-store','Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info','Access-Control-Allow-Methods':'POST, OPTIONS'};
 const reply=(status:number,data:unknown)=>new Response(JSON.stringify(data),{status,headers});
 Deno.serve(async(req)=>{
+ if(req.method==='OPTIONS') return new Response(null,{status:204,headers});
  if(req.method!=='POST') return reply(405,{error:'Method not allowed'});
  const auth=req.headers.get('Authorization')||'';
  if(!/^Bearer [^\s]+$/.test(auth)) return reply(401,{error:'Unauthorized'});
