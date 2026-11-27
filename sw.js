@@ -1,10 +1,13 @@
-// NEXUS AI - service worker: aplikacija se otvara i bez interneta, uvijek uzima najnoviju verziju kad ima interneta
-const C = 'nexus-v17';
-const FILES = ['./', 'index.html', 'manifest.json', 'ikona-192.png', 'ikona-512.png'];
-self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x)))).then(() => self.clients.claim())); });
+const CACHE = 'nexus-static-v18';
+const FILES = ['./','index.html','manifest.json','ikona-192.png','ikona-512.png'].map(p => new URL(p,self.registration.scope).href);
+const ALLOWED = new Set(FILES);
+self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
+self.addEventListener('activate', e => e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('nexus-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch', e => {
-  const u = new URL(e.request.url);
-  if (e.request.method !== 'GET' || u.origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then(r => { const cp = r.clone(); caches.open(C).then(c => c.put(e.request, cp)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match('./'))));
+ const r=e.request;
+ if(r.method!=='GET'||!ALLOWED.has(r.url)||r.headers.has('Authorization')) return;
+ e.respondWith(fetch(r).then(async res=>{
+ if(res.ok&&!res.redirected&&!/private|no-store/i.test(res.headers.get('Cache-Control')||'')) { const c=await caches.open(CACHE); await c.put(r,res.clone()); }
+ return res;
+ }).catch(async()=> (await caches.match(r,{cacheName:CACHE}))||Response.error()));
 });
