@@ -1,0 +1,8 @@
+export const reports=Object.freeze({prices:'Cjenik',stock:'Stanje lokala',recipes:'Normativi proizvoda s podartiklima',taxes:'Pregled poreza po artiklima',kpd:'Ispis artikala - grupirano po KPD',sales:'Ispis prodajnih artikala',invoices:'Pregled računa'});
+export function previewPrices(rows,venue){
+ if(!['NOMAD','Artist'].includes(venue)||!Array.isArray(rows)||rows.length>10000)throw Error('Neispravan uvoz');
+ const h=rows.findIndex(r=>r[0]==='Šifra'&&r[1]==='Naziv'&&r[3]==='Trenutna cijena');if(h<0)throw Error('Nepoznato zaglavlje');
+ const seen=new Set();return rows.slice(h+1).filter(r=>r.some(v=>v!=null&&v!=='')).map(r=>{const sku=String(r[0]??'').trim(),name=String(r[1]??'').trim(),price=r[3],errors=[];if(!sku||!name)errors.push('Nedostaje identitet');if(seen.has(sku))errors.push('Duplikat');seen.add(sku);if(typeof price!=='number'||!Number.isFinite(price)||price<0)errors.push('Cijena');return {venue,sku,name,sales_group:r[2]??'',sale_price:price,proposed_price:r[4]??null,errors};});
+}
+export function previewPDF(pages){if(!Array.isArray(pages)||!pages.length||pages.length>200)throw Error('Neispravan PDF');return pages.map((text,i)=>({page:i+1,text:String(text),review_required:true}));}
+export function invoiceAnalytics(invoices){const seen=new Set(),days={};let cents=0;for(const r of invoices){if(!r.venue||!r.number||!/^\d{4}-\d{2}-\d{2}$/.test(r.date)||!Number.isSafeInteger(r.cents))throw Error('Neispravan račun');const key=JSON.stringify([r.venue,r.date,r.number]);if(seen.has(key))throw Error('Duplikat računa');seen.add(key);days[r.date]=(days[r.date]||0)+r.cents;cents+=r.cents;}return {count:seen.size,cents,days};}
